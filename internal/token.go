@@ -168,11 +168,7 @@ func providerAuthHeaderWorks(tokenURL string) bool {
 	return true
 }
 
-func RetrieveToken(ctx context.Context, clientID, clientSecret, tokenURL string, v url.Values) (*Token, error) {
-	hc, err := ContextClient(ctx)
-	if err != nil {
-		return nil, err
-	}
+func RetrieveToken(ctx context.Context, hc *http.Client, clientID, clientSecret, tokenURL string, v url.Values) (*Token, error) {
 	bustedAuth := !providerAuthHeaderWorks(tokenURL)
 	if bustedAuth {
 		if clientID != "" {
