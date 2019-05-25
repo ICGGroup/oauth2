@@ -14,14 +14,14 @@
 package clientcredentials // import "github.com/jfcote87/oauth2/clientcredentials"
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 
-	"golang.org/x/net/context"
+	"github.com/jfcote87/ctxclient"
 	"github.com/jfcote87/oauth2"
-	"github.com/jfcote87/oauth2/internal"
 )
 
 // Config describes a 2-legged OAuth2 flow, with both the
@@ -42,21 +42,23 @@ type Config struct {
 
 	// EndpointParams specifies additional parameters for requests to the token endpoint.
 	EndpointParams url.Values
-}
 
-// Token uses client credentials to retrieve a token.
-// The HTTP client to use is derived from the context.
-// If nil, http.DefaultClient is used.
-func (c *Config) Token(ctx context.Context) (*oauth2.Token, error) {
-	return c.TokenSource(ctx).Token()
+	// ExpiryDelta determines how man seconds sooner a token should
+	// expire than the delivered expiration time.
+	ExpiryDelta int64
+
+	// HTTPClientFunc specifies a function specifiying
+	// the *http.Client used on Token calls to the oauth2
+	// server.  If nil,
+	HTTPClientFunc ctxclient.Func
 }
 
 // Client returns an HTTP client using the provided token.
 // The token will auto-refresh as necessary. The underlying
-// HTTP transport will be obtained using the provided context.
+// HTTP transport by requests contexts.
 // The returned client and its Transport should not be modified.
-func (c *Config) Client(ctx context.Context) *http.Client {
-	return oauth2.NewClient(ctx, c.TokenSource(ctx))
+func (c *Config) Client(t *oauth2.Token) (*http.Client, error) {
+	return oauth2.Client(c.TokenSource(t), nil), nil
 }
 
 // TokenSource returns a TokenSource that returns t until t expires,
@@ -64,41 +66,28 @@ func (c *Config) Client(ctx context.Context) *http.Client {
 // client ID and client secret.
 //
 // Most users will use Config.Client instead.
-func (c *Config) TokenSource(ctx context.Context) oauth2.TokenSource {
-	source := &tokenSource{
-		ctx:  ctx,
-		conf: c,
-	}
-	return oauth2.ReuseTokenSource(nil, source)
-}
-
-type tokenSource struct {
-	ctx  context.Context
-	conf *Config
+func (c *Config) TokenSource(t *oauth2.Token) oauth2.TokenSource {
+	return oauth2.ReuseTokenSource(t, c)
 }
 
 // Token refreshes the token by using a new client credentials request.
-// tokens received this way do not include a refresh token
-func (c *tokenSource) Token() (*oauth2.Token, error) {
+// tokens received this way do not include a refresh token.
+// Do not call this function directly unless creating own
+// caching tokensource.  Use the tokensource create by
+// Config.TokenSource.
+func (c *Config) Token(ctx context.Context) (*oauth2.Token, error) {
 	v := url.Values{
 		"grant_type": {"client_credentials"},
-		"scope":      internal.CondVal(strings.Join(c.conf.Scopes, " ")),
 	}
-	for k, p := range c.conf.EndpointParams {
+	if len(c.Scopes) > 0 {
+		v["scope"] = []string{strings.Join(c.Scopes, " ")}
+	}
+	for k, p := range c.EndpointParams {
 		if _, ok := v[k]; ok {
 			return nil, fmt.Errorf("oauth2: cannot overwrite parameter %q", k)
 		}
 		v[k] = p
 	}
-	tk, err := internal.RetrieveToken(c.ctx, c.conf.ClientID, c.conf.ClientSecret, c.conf.TokenURL, v)
-	if err != nil {
-		return nil, err
-	}
-	t := &oauth2.Token{
-		AccessToken:  tk.AccessToken,
-		TokenType:    tk.TokenType,
-		RefreshToken: tk.RefreshToken,
-		Expiry:       tk.Expiry,
-	}
-	return t.WithExtra(tk.Raw), nil
+	return oauth2.RetrieveToken(ctx, c.HTTPClientFunc, c.ClientID, c.ClientSecret, c.TokenURL, v, c.ExpiryDelta)
+
 }

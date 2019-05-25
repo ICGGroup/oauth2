@@ -5,12 +5,11 @@
 package google
 
 import (
-	"crypto/rsa"
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/jfcote87/oauth2"
-	"github.com/jfcote87/oauth2/internal"
 	"github.com/jfcote87/oauth2/jws"
 )
 
@@ -28,17 +27,12 @@ func JWTAccessTokenSourceFromJSON(jsonKey []byte, audience string) (oauth2.Token
 	if err != nil {
 		return nil, fmt.Errorf("google: could not parse JSON key: %v", err)
 	}
-	pk, err := internal.ParseKey(cfg.PrivateKey)
-	if err != nil {
-		return nil, fmt.Errorf("google: could not parse key: %v", err)
-	}
 	ts := &jwtAccessTokenSource{
-		email:    cfg.Email,
+		email:    cfg.Issuer,
 		audience: audience,
-		pk:       pk,
-		pkID:     cfg.PrivateKeyID,
+		signer:   cfg.Signer,
 	}
-	tok, err := ts.Token()
+	tok, err := ts.Token(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -47,26 +41,21 @@ func JWTAccessTokenSourceFromJSON(jsonKey []byte, audience string) (oauth2.Token
 
 type jwtAccessTokenSource struct {
 	email, audience string
-	pk              *rsa.PrivateKey
-	pkID            string
+	signer          jws.Signer
 }
 
-func (ts *jwtAccessTokenSource) Token() (*oauth2.Token, error) {
+func (ts *jwtAccessTokenSource) Token(ctx context.Context) (*oauth2.Token, error) {
 	iat := time.Now()
 	exp := iat.Add(time.Hour)
 	cs := &jws.ClaimSet{
-		Iss: ts.email,
-		Sub: ts.email,
-		Aud: ts.audience,
-		Iat: iat.Unix(),
-		Exp: exp.Unix(),
+		Issuer:    ts.email,
+		Subject:   ts.email,
+		Audience:  ts.audience,
+		IssuedAt:  iat.Unix(),
+		ExpiresAt: exp.Unix(),
 	}
-	hdr := &jws.Header{
-		Algorithm: "RS256",
-		Typ:       "JWT",
-		KeyID:     string(ts.pkID),
-	}
-	msg, err := jws.Encode(hdr, cs, ts.pk)
+	cs.JWT(ts.signer)
+	msg, err := cs.JWT(ts.signer)
 	if err != nil {
 		return nil, fmt.Errorf("google: could not encode JWT: %v", err)
 	}

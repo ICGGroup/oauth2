@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package clientcredentials
+package clientcredentials_test
 
 import (
 	"context"
@@ -11,10 +11,12 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"github.com/jfcote87/oauth2/clientcredentials"
 )
 
-func newConf(serverURL string) *Config {
-	return &Config{
+func newConf(serverURL string) *clientcredentials.Config {
+	return &clientcredentials.Config{
 		ClientID:       "CLIENT_ID",
 		ClientSecret:   "CLIENT_SECRET",
 		Scopes:         []string{"scope1", "scope2"},
@@ -92,6 +94,6 @@ func TestTokenRefreshRequest(t *testing.T) {
 	}))
 	defer ts.Close()
 	conf := newConf(ts.URL)
-	c := conf.Client(context.Background())
+	c, _ := conf.Client(nil)
 	c.Get(ts.URL + "/somethingelse")
 }

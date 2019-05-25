@@ -1,15 +1,54 @@
-// Copyright 2014 The Go Authors. All rights reserved.
+// Copyright 2017 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
+
+// +build go1.7
 
 package oauth2
 
 import (
 	"errors"
-	"io"
 	"net/http"
-	"sync"
+
+	"github.com/jfcote87/ctxclient"
 )
+
+// Client returns an HTTP client using the provided token.
+// The token will auto-refresh as necessary. The underlying
+// Client returns an HTTP client using the provided token.
+// HTTP transport will be obtained using Config.HTTPClient.
+// The returned client and its Transport should not be modified.
+//
+// The returned client uses the request's context to handle
+// timeouts and cancellations.  It may be used concurrently
+// as the token refresh is protected
+func (c *Config) Client(t *Token) *http.Client {
+	if c == nil {
+		return nil
+	}
+	return &http.Client{
+		Transport: &Transport{
+			Source: c.TokenSource(t),
+			Func:   c.HTTPClientFunc,
+		},
+	}
+}
+
+// Client creates a client that sets an authorization
+// header based on tokens created by the ctxtokensource ts.
+func Client(ts TokenSource, f ctxclient.Func) *http.Client {
+	if ts == nil {
+		return &http.Client{
+			Transport: &ctxclient.ErrorTransport{Err: errors.New("oauth2: nil tokensource specified")},
+		}
+	}
+	return &http.Client{
+		Transport: &Transport{
+			Source: ts,
+			Func:   f,
+		},
+	}
+}
 
 // Transport is an http.RoundTripper that makes OAuth 2.0 HTTP requests,
 // wrapping a base RoundTripper and adding an Authorization header
@@ -21,112 +60,34 @@ type Transport struct {
 	// Source supplies the token to add to outgoing requests'
 	// Authorization headers.
 	Source TokenSource
-
-	// Base is the base RoundTripper used to make HTTP requests.
-	// If nil, http.DefaultTransport is used.
-	Base http.RoundTripper
-
-	mu     sync.Mutex                      // guards modReq
-	modReq map[*http.Request]*http.Request // original -> modified
+	ctxclient.Func
 }
 
 // RoundTrip authorizes and authenticates the request with an
 // access token. If no token exists or token is expired,
-// tries to refresh/fetch a new token.
+// it fetches a new token passing along the request's context.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.Source == nil {
-		return nil, errors.New("oauth2: Transport's Source is nil")
+		return ctxclient.RequestError(req, errors.New("oauth2: Transport's Source is nil"))
 	}
-	token, err := t.Source.Token()
+	ctx := req.Context()
+	tk, err := t.Source.Token(ctx)
 	if err != nil {
-		return nil, err
+		return ctxclient.RequestError(req, err)
 	}
-
 	req2 := cloneRequest(req) // per RoundTripper contract
-	token.SetAuthHeader(req2)
-	t.setModReq(req, req2)
-	res, err := t.base().RoundTrip(req2)
-	if err != nil {
-		t.setModReq(req, nil)
-		return nil, err
-	}
-	res.Body = &onEOFReader{
-		rc: res.Body,
-		fn: func() { t.setModReq(req, nil) },
-	}
-	return res, nil
+	tk.SetAuthHeader(req2)
+	return t.Func.Do(ctx, req2)
 }
 
-// CancelRequest cancels an in-flight request by closing its connection.
-func (t *Transport) CancelRequest(req *http.Request) {
-	type canceler interface {
-		CancelRequest(*http.Request)
-	}
-	if cr, ok := t.base().(canceler); ok {
-		t.mu.Lock()
-		modReq := t.modReq[req]
-		delete(t.modReq, req)
-		t.mu.Unlock()
-		cr.CancelRequest(modReq)
-	}
-}
-
-func (t *Transport) base() http.RoundTripper {
-	if t.Base != nil {
-		return t.Base
-	}
-	return http.DefaultTransport
-}
-
-func (t *Transport) setModReq(orig, mod *http.Request) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.modReq == nil {
-		t.modReq = make(map[*http.Request]*http.Request)
-	}
-	if mod == nil {
-		delete(t.modReq, orig)
-	} else {
-		t.modReq[orig] = mod
-	}
-}
-
-// cloneRequest returns a clone of the provided *http.Request.
-// The clone is a shallow copy of the struct and its Header map.
+// deep copy header
 func cloneRequest(r *http.Request) *http.Request {
-	// shallow copy of the struct
-	r2 := new(http.Request)
-	*r2 = *r
-	// deep copy of the Header
-	r2.Header = make(http.Header, len(r.Header))
-	for k, s := range r.Header {
-		r2.Header[k] = append([]string(nil), s...)
+	h := make(http.Header)
+	for k, v := range r.Header {
+		h[k] = v
 	}
-	return r2
-}
+	newReq := *r
 
-type onEOFReader struct {
-	rc io.ReadCloser
-	fn func()
-}
-
-func (r *onEOFReader) Read(p []byte) (n int, err error) {
-	n, err = r.rc.Read(p)
-	if err == io.EOF {
-		r.runFunc()
-	}
-	return
-}
-
-func (r *onEOFReader) Close() error {
-	err := r.rc.Close()
-	r.runFunc()
-	return err
-}
-
-func (r *onEOFReader) runFunc() {
-	if fn := r.fn; fn != nil {
-		fn()
-		r.fn = nil
-	}
+	newReq.Header = h
+	return &newReq
 }

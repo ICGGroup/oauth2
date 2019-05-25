@@ -15,15 +15,18 @@
 package google // import "github.com/jfcote87/oauth2/google"
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/compute/metadata"
-	"golang.org/x/net/context"
+
 	"github.com/jfcote87/oauth2"
+	"github.com/jfcote87/oauth2/jws"
 	"github.com/jfcote87/oauth2/jwt"
 )
 
@@ -94,7 +97,7 @@ func JWTConfigFromJSON(jsonKey []byte, scope ...string) (*jwt.Config, error) {
 		return nil, fmt.Errorf("google: read JWT from JSON credentials: 'type' field is %q (expected %q)", f.Type, serviceAccountKey)
 	}
 	scope = append([]string(nil), scope...) // copy
-	return f.jwtConfig(scope), nil
+	return f.jwtConfig(scope)
 }
 
 // JSON key file types.
@@ -121,25 +124,33 @@ type credentialsFile struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
-func (f *credentialsFile) jwtConfig(scopes []string) *jwt.Config {
+func (f *credentialsFile) jwtConfig(scopes []string) (*jwt.Config, error) {
+	signer, err := jws.RS256FromPEM([]byte(f.PrivateKey), f.PrivateKeyID)
+	if err != nil {
+		return nil, err
+	}
 	cfg := &jwt.Config{
-		Email:        f.ClientEmail,
-		PrivateKey:   []byte(f.PrivateKey),
-		PrivateKeyID: f.PrivateKeyID,
-		Scopes:       scopes,
-		TokenURL:     f.TokenURL,
+		Issuer:   f.ClientEmail,
+		Signer:   signer,
+		Scopes:   scopes,
+		TokenURL: f.TokenURL,
+		Audience: f.TokenURL,
 	}
 	if cfg.TokenURL == "" {
 		cfg.TokenURL = JWTTokenURL
+		cfg.Audience = JWTTokenURL
 	}
-	return cfg
+	return cfg, nil
 }
 
-func (f *credentialsFile) tokenSource(ctx context.Context, scopes []string) (oauth2.TokenSource, error) {
+func (f *credentialsFile) tokenSource(scopes []string) (oauth2.TokenSource, error) {
 	switch f.Type {
 	case serviceAccountKey:
-		cfg := f.jwtConfig(scopes)
-		return cfg.TokenSource(ctx), nil
+		cfg, err := f.jwtConfig(scopes)
+		if err != nil {
+			return nil, err
+		}
+		return cfg.TokenSource(nil), nil
 	case userCredentialsKey:
 		cfg := &oauth2.Config{
 			ClientID:     f.ClientID,
@@ -148,7 +159,7 @@ func (f *credentialsFile) tokenSource(ctx context.Context, scopes []string) (oau
 			Endpoint:     Endpoint,
 		}
 		tok := &oauth2.Token{RefreshToken: f.RefreshToken}
-		return cfg.TokenSource(ctx, tok), nil
+		return cfg.TokenSource(tok), nil
 	case "":
 		return nil, errors.New("missing 'type' field in credentials")
 	default:
@@ -162,15 +173,16 @@ func (f *credentialsFile) tokenSource(ctx context.Context, scopes []string) (oau
 // If no account is specified, "default" is used.
 // Further information about retrieving access tokens from the GCE metadata
 // server can be found at https://cloud.google.com/compute/docs/authentication.
-func ComputeTokenSource(account string) oauth2.TokenSource {
-	return oauth2.ReuseTokenSource(nil, computeSource{account: account})
+func ComputeTokenSource(account string, scopes ...string) oauth2.TokenSource {
+	return oauth2.ReuseTokenSource(nil, computeSource{account: account, scopes: scopes})
 }
 
 type computeSource struct {
 	account string
+	scopes  []string
 }
 
-func (cs computeSource) Token() (*oauth2.Token, error) {
+func (cs computeSource) Token(ctx context.Context) (*oauth2.Token, error) {
 	if !metadata.OnGCE() {
 		return nil, errors.New("oauth2/google: can't get a token from the metadata service; not running on GCE")
 	}
@@ -178,7 +190,13 @@ func (cs computeSource) Token() (*oauth2.Token, error) {
 	if acct == "" {
 		acct = "default"
 	}
-	tokenJSON, err := metadata.Get("instance/service-accounts/" + acct + "/token")
+	tokenURI := "instance/service-accounts/" + acct + "/token"
+	if len(cs.scopes) > 0 {
+		v := url.Values{}
+		v.Set("scopes", strings.Join(cs.scopes, ","))
+		tokenURI = tokenURI + "?" + v.Encode()
+	}
+	tokenJSON, err := metadata.Get(tokenURI)
 	if err != nil {
 		return nil, err
 	}

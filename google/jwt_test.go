@@ -2,20 +2,20 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package google
+package google_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/jfcote87/oauth2/google"
 	"github.com/jfcote87/oauth2/jws"
 )
 
@@ -37,12 +37,12 @@ func TestJWTAccessTokenSourceFromJSON(t *testing.T) {
 	}
 	jsonKey := bytes.Replace(jwtJSONKey, []byte(`"super secret key"`), enc, 1)
 
-	ts, err := JWTAccessTokenSourceFromJSON(jsonKey, "audience")
+	ts, err := google.JWTAccessTokenSourceFromJSON(jsonKey, "audience")
 	if err != nil {
 		t.Fatalf("JWTAccessTokenSourceFromJSON: %v\nJSON: %s", err, string(jsonKey))
 	}
 
-	tok, err := ts.Token()
+	tok, err := ts.Token(context.TODO())
 	if err != nil {
 		t.Fatalf("Token: %v", err)
 	}
@@ -54,38 +54,34 @@ func TestJWTAccessTokenSourceFromJSON(t *testing.T) {
 		t.Errorf("Expiry = %v, should not be expired", got)
 	}
 
-	err = jws.Verify(tok.AccessToken, &privateKey.PublicKey)
+	err = jws.Verify(tok.AccessToken, jws.RS256Verifier(&privateKey.PublicKey))
 	if err != nil {
 		t.Errorf("jws.Verify on AccessToken: %v", err)
 	}
 
-	claim, err := jws.Decode(tok.AccessToken)
+	claim, err := jws.DecodePayload(tok.AccessToken)
 	if err != nil {
 		t.Fatalf("jws.Decode on AccessToken: %v", err)
 	}
 
-	if got, want := claim.Iss, "gopher@developer.gserviceaccount.com"; got != want {
+	if got, want := claim.Issuer, "gopher@developer.gserviceaccount.com"; got != want {
 		t.Errorf("Iss = %q, want %q", got, want)
 	}
-	if got, want := claim.Sub, "gopher@developer.gserviceaccount.com"; got != want {
+	if got, want := claim.Subject, "gopher@developer.gserviceaccount.com"; got != want {
 		t.Errorf("Sub = %q, want %q", got, want)
 	}
-	if got, want := claim.Aud, "audience"; got != want {
+	if got, want := claim.Audience, "audience"; got != want {
 		t.Errorf("Aud = %q, want %q", got, want)
 	}
 
 	// Finally, check the header private key.
-	parts := strings.Split(tok.AccessToken, ".")
-	hdrJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil {
-		t.Fatalf("base64 DecodeString: %v\nString: %q", err, parts[0])
+	var hdrMap = struct {
+		KeyID string `json:"kid"`
+	}{}
+	if err := jws.DecodeHeader(tok.AccessToken, &hdrMap); err != nil {
+		t.Errorf("jwt header decode: %v", err)
 	}
-	var hdr jws.Header
-	if err := json.Unmarshal([]byte(hdrJSON), &hdr); err != nil {
-		t.Fatalf("json.Unmarshal: %v (%q)", err, hdrJSON)
-	}
-
-	if got, want := hdr.KeyID, "268f54e43a1af97cfc71731688434f45aca15c8b"; got != want {
+	if got, want := hdrMap.KeyID, "268f54e43a1af97cfc71731688434f45aca15c8b"; got != want {
 		t.Errorf("Header KeyID = %q, want %q", got, want)
 	}
 }

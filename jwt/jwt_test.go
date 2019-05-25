@@ -2,18 +2,26 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package jwt
+package jwt_test
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jfcote87/oauth2"
 	"github.com/jfcote87/oauth2/jws"
+	"github.com/jfcote87/oauth2/jwt"
 )
 
 var dummyPrivateKey = []byte(`-----BEGIN RSA PRIVATE KEY-----
@@ -56,16 +64,18 @@ func TestJWTFetch_JSONResponse(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	conf := &Config{
-		Email:      "aaa@xxx.com",
-		PrivateKey: dummyPrivateKey,
-		TokenURL:   ts.URL,
+	signer, _ := jws.RS256FromPEM(dummyPrivateKey, "")
+	conf := &jwt.Config{
+		Issuer:   "aaa@xxx.com",
+		Signer:   signer,
+		TokenURL: ts.URL,
 	}
-	tok, err := conf.TokenSource(context.Background()).Token()
+	tok, err := conf.TokenSource(nil).Token(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !tok.Valid() {
+		log.Printf("%#v", tok)
 		t.Errorf("got invalid token: %v", tok)
 	}
 	if got, want := tok.AccessToken, "90d64460d14870c08c81352a05dedd3465940a7c"; got != want {
@@ -90,12 +100,13 @@ func TestJWTFetch_BadResponse(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	conf := &Config{
-		Email:      "aaa@xxx.com",
-		PrivateKey: dummyPrivateKey,
-		TokenURL:   ts.URL,
+	signer, _ := jws.RS256FromPEM(dummyPrivateKey, "")
+	conf := &jwt.Config{
+		Issuer:   "aaa@xxx.com",
+		Signer:   signer,
+		TokenURL: ts.URL,
 	}
-	tok, err := conf.TokenSource(context.Background()).Token()
+	tok, err := conf.TokenSource(nil).Token(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,21 +129,31 @@ func TestJWTFetch_BadResponse(t *testing.T) {
 }
 
 func TestJWTFetch_BadResponseType(t *testing.T) {
+	responses := []string{
+		`{"access_token":123, "scope": "user", "token_type": "bearer"}`,
+		`{"access_token":"123", "scope": "user", "token_type": true}`,
+		`{"access_token":"123", "scope": "user", "id_token": "abcdef", "token_type": "bearer"}`,
+		`{"access_token":"123", "scope": "user", "token_type": "bearer", "expires_in": "60"}`,
+		`{"access_token":"123", "scope": "user", "token_type": "mac", "expires_in": {}}`,
+	}
+	counter := 0
+
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"access_token":123, "scope": "user", "token_type": "bearer"}`))
+		w.Write([]byte(responses[counter]))
+		//`{"access_token":123, "scope": "user", "token_type": "bearer"}`))
 	}))
 	defer ts.Close()
-	conf := &Config{
-		Email:      "aaa@xxx.com",
-		PrivateKey: dummyPrivateKey,
-		TokenURL:   ts.URL,
+	signer, _ := jws.RS256FromPEM(dummyPrivateKey, "")
+	conf := &jwt.Config{
+		Issuer:   "aaa@xxx.com",
+		Signer:   signer,
+		TokenURL: ts.URL,
 	}
-	tok, err := conf.TokenSource(context.Background()).Token()
-	if err == nil {
-		t.Error("got a token; expected error")
-		if got, want := tok.AccessToken, ""; got != want {
-			t.Errorf("access token = %q; want %q", got, want)
+	for counter = 0; counter < len(responses); counter++ {
+		_, err := conf.TokenSource(nil).Token(context.Background())
+		if err == nil {
+			t.Error("got a token; expected error")
 		}
 	}
 }
@@ -153,14 +174,14 @@ func TestJWTFetch_Assertion(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	conf := &Config{
-		Email:        "aaa@xxx.com",
-		PrivateKey:   dummyPrivateKey,
-		PrivateKeyID: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-		TokenURL:     ts.URL,
+	signer, _ := jws.RS256FromPEM(dummyPrivateKey, "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	conf := &jwt.Config{
+		Issuer:   "aaa@xxx.com",
+		Signer:   signer,
+		TokenURL: ts.URL,
 	}
 
-	_, err := conf.TokenSource(context.Background()).Token()
+	_, err := conf.TokenSource(nil).Token(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to fetch token: %v", err)
 	}
@@ -174,17 +195,201 @@ func TestJWTFetch_Assertion(t *testing.T) {
 		t.Fatalf("invalid token header; err = %v", err)
 	}
 
-	got := jws.Header{}
+	got := make(map[string]interface{})
 	if err := json.Unmarshal(gotjson, &got); err != nil {
 		t.Errorf("failed to unmarshal json token header = %q; err = %v", gotjson, err)
 	}
 
-	want := jws.Header{
-		Algorithm: "RS256",
-		Typ:       "JWT",
-		KeyID:     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+	want := map[string]interface{}{
+		"alg": "RS256",
+		"typ": "JWT",
+		"kid": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
 	}
-	if got != want {
-		t.Errorf("access token header = %q; want %q", got, want)
+	for k, v := range got {
+		if v != want[k] {
+			t.Errorf("jwt header claim %s = %q; want %q", k, got, want[k])
+		}
 	}
+}
+
+func TestJWTIDToken_ExpiryDetail(t *testing.T) {
+	tm := time.Now().Add(time.Hour)
+
+	payload := &jws.ClaimSet{
+		Issuer:    "http://google.com/",
+		Audience:  "",
+		ExpiresAt: tm.Unix(),
+		IssuedAt:  10,
+	}
+	tm = time.Unix(tm.Unix(), 0)
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	encodedClaimSet, err := payload.JWT(jws.RS256(privateKey, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"access_token":"123", "scope": "user", "id_token":"%s", "token_type": "bearer"}`, encodedClaimSet)
+	}))
+
+	conf := &jwt.Config{
+		Issuer:     "aaa@xxx.com",
+		Signer:     jws.RS256(privateKey, ""),
+		TokenURL:   ts.URL,
+		Expiration: jwt.DefaultExpiration().ExpiryDelta(60),
+		// &jwt.ExpirationSetting{
+		//	ExpiryDelta: 60,
+		//},
+	}
+	tok, err := conf.TokenSource(nil).Token(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if tm.Sub(tok.Expiry) != time.Minute {
+		t.Errorf("token expiry = %v; want %v", tok.Expiry, tm.Add(-time.Minute))
+	}
+}
+
+func TestConfigOptions(t *testing.T) {
+	tm := time.Now().Add(time.Hour)
+
+	payload := &jws.ClaimSet{
+		Issuer:    "http://google.com/",
+		Audience:  "",
+		ExpiresAt: tm.Unix(),
+		IssuedAt:  10,
+	}
+	tm = time.Unix(tm.Unix(), 0)
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	encodedClaimSet, err := payload.JWT(jws.RS256(privateKey, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		if r.Form.Get("extra") != "value" {
+			t.Errorf("expected extra = value; got %s", r.Form.Get("extra"))
+		}
+		if cl, err := jws.DecodePayload(r.Form.Get("assertion")); err != nil {
+			t.Errorf("expected private claim map[pv:pval scope:s1 s2]; got %v", err)
+
+		} else if cl.PrivateClaims == nil || cl.PrivateClaims["pc"] != "pval" || cl.PrivateClaims["scope"] != "s1 s2" {
+			t.Errorf("expected private claim map[pv:pval scope:s1 s2]; got %v", cl.PrivateClaims)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"access_token":"123", "scope": "user", "id_token":"%s", "token_type": "bearer"}`, encodedClaimSet)
+	}))
+
+	conf := &jwt.Config{
+		Issuer:     "aaa@xxx.com",
+		Signer:     jws.RS256(privateKey, ""),
+		TokenURL:   ts.URL,
+		Expiration: jwt.DefaultExpiration().ExpiryDelta(60),
+		//&jwt.ExpirationSetting{
+		//	ExpiryDelta: 60,
+		//},
+		Scopes: []string{"s1", "s2"},
+		Options: &jwt.ConfigOptions{
+			PrivateClaims: map[string]interface{}{
+				"pc": "pval",
+			},
+			FormValues: url.Values{
+				"extra": {"value"},
+			},
+		},
+	}
+	tok, err := conf.TokenSource(nil).Token(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if tm.Sub(tok.Expiry) != time.Minute {
+		t.Errorf("token expiry = %v; want %v", tok.Expiry, tm.Add(-time.Minute))
+	}
+}
+
+func TestLegacyConfig(t *testing.T) {
+	cfg := jwt.LegacyConfig{
+		Email:        "abc@example.com",
+		PrivateKey:   []byte("bad key"),
+		PrivateKeyID: "KEY ID",
+		Scopes:       []string{"scope1", "scope2"},
+		TokenURL:     "https://www.example.com/token",
+		Expires:      30 * time.Minute,
+	}
+	newcfg, err := cfg.Config()
+	if err == nil {
+		t.Errorf("LegacyConfig expected invalid key; got success")
+		return
+	}
+	cfg.PrivateKey = dummyPrivateKey
+	if newcfg, err = cfg.Config(); err != nil {
+		t.Errorf("LegacyConfig.Config() expected success; got %v", err)
+		return
+	}
+	exp, _, iat := newcfg.Expiration.Values()
+	if newcfg.Expiration == nil || exp != int64(cfg.Expires/time.Second) || iat != 10 {
+		t.Errorf("LegacyConfig.Config expected &jwt.ExpirationSetting{Expires:1800000000000, ExpiryDelta:0, IatOffset:10000000000}; got %#v", newcfg.Expiration)
+	}
+}
+
+func TestExpirationSettings(t *testing.T) {
+	var expPtr *jwt.ExpirationSetting
+	if expires, delta, iatOff := expPtr.Values(); expires != 3600 || delta != oauth2.DefaultExpiryDelta || iatOff != 10 {
+		t.Errorf("nil ExpirationSettings expected default of %d, %d, %d; got %d, %d, %d",
+			time.Hour, oauth2.DefaultExpiryDelta, 10*time.Second, expires, delta, iatOff)
+	}
+	if expires, delta, iatOff := expPtr.Duration(60).Values(); expires != 60 || delta != oauth2.DefaultExpiryDelta || iatOff != 10 {
+		t.Errorf("ExpirationSettings Duration expected %d, %d, %d; got %d, %d, %d",
+			60, oauth2.DefaultExpiryDelta, 10, expires, delta, iatOff)
+	}
+	if expires, delta, iatOff := expPtr.ExpiryDelta(5).Values(); expires != 3600 || delta != 5 || iatOff != 10 {
+		t.Errorf("ExpirationSettings ExpiryDelta expected %d, %d, %d; got %d, %d, %d",
+			3600, 5, 10, expires, delta, iatOff)
+	}
+	if expires, delta, iatOff := expPtr.IatOffset(60).Values(); expires != 3600 || delta != oauth2.DefaultExpiryDelta || iatOff != 60 {
+		t.Errorf("ExpirationSettings IatOffset expected %d, %d, %d; got %d, %d, %d",
+			3600, oauth2.DefaultExpiryDelta, 60, expires, delta, iatOff)
+	}
+
+	expPtr = jwt.DefaultExpiration().Duration(60).ExpiryDelta(5).IatOffset(1)
+	b, err := json.Marshal(expPtr)
+	if err != nil {
+		t.Errorf("ExpirationSetting marshal: %v", err)
+		return
+	}
+	expPtr = nil
+	if err = json.Unmarshal(b, &expPtr); err != nil {
+		t.Errorf("ExpirationSetting unmarshal: %v", err)
+		return
+	}
+	if expires, delta, iatOff := expPtr.Values(); expires != 60 || delta != 5 || iatOff != 1 {
+		t.Errorf("Marshal/Unmarshal ExpirationSettings expected %d, %d, %d; got %d, %d, %d",
+			60, 5, 1, expires, delta, iatOff)
+	}
+	b = []byte(`{"expiryDelta": 20}`)
+	expPtr = nil
+	if err = json.Unmarshal(b, &expPtr); err != nil {
+		t.Errorf("ExpirationSetting unmarshal: %v", err)
+		return
+	}
+	if expires, delta, iatOff := expPtr.Values(); expires != 3600 || delta != 20 || iatOff != 10 {
+		t.Errorf("Marshal/Unmarshal ExpirationSettings expiryDelta expected %d, %d, %d; got %d, %d, %d",
+			3600, 20, 10, expires, delta, iatOff)
+	}
+
 }

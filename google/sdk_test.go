@@ -2,14 +2,18 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package google
+package google_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/jfcote87/oauth2/google"
+)
 
 func TestSDKConfig(t *testing.T) {
-	sdkConfigPath = func() (string, error) {
+	google.SetSDKConfigPathFunc(func() (string, error) {
 		return "testdata/gcloud", nil
-	}
+	})
 
 	tests := []struct {
 		account     string
@@ -22,7 +26,7 @@ func TestSDKConfig(t *testing.T) {
 		{"baz@serviceaccount.example.com", "", true},
 	}
 	for _, tt := range tests {
-		c, err := NewSDKConfig(tt.account)
+		c, err := google.NewSDKConfig(tt.account)
 		if got, want := err != nil, tt.err; got != want {
 			if !tt.err {
 				t.Errorf("got %v, want nil", err)
@@ -34,7 +38,7 @@ func TestSDKConfig(t *testing.T) {
 		if err != nil {
 			continue
 		}
-		tok := c.initialToken
+		tok := c.InitialToken()
 		if tok == nil {
 			t.Errorf("got nil, want %q", tt.accessToken)
 			continue

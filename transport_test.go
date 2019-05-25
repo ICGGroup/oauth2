@@ -1,20 +1,23 @@
-package oauth2
+package oauth2_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/jfcote87/oauth2"
 )
 
-type tokenSource struct{ token *Token }
+type tokenSource struct{ token *oauth2.Token }
 
-func (t *tokenSource) Token() (*Token, error) {
+func (t *tokenSource) Token(ctx context.Context) (*oauth2.Token, error) {
 	return t.token, nil
 }
 
 func TestTransportNilTokenSource(t *testing.T) {
-	tr := &Transport{}
+	tr := &oauth2.Transport{}
 	server := newMockServer(func(w http.ResponseWriter, r *http.Request) {})
 	defer server.Close()
 	client := &http.Client{Transport: tr}
@@ -29,11 +32,11 @@ func TestTransportNilTokenSource(t *testing.T) {
 
 func TestTransportTokenSource(t *testing.T) {
 	ts := &tokenSource{
-		token: &Token{
+		token: &oauth2.Token{
 			AccessToken: "abc",
 		},
 	}
-	tr := &Transport{
+	tr := &oauth2.Transport{
 		Source: ts,
 	}
 	server := newMockServer(func(w http.ResponseWriter, r *http.Request) {
@@ -64,12 +67,12 @@ func TestTransportTokenSourceTypes(t *testing.T) {
 	}
 	for _, tc := range tests {
 		ts := &tokenSource{
-			token: &Token{
+			token: &oauth2.Token{
 				AccessToken: tc.val,
 				TokenType:   tc.key,
 			},
 		}
-		tr := &Transport{
+		tr := &oauth2.Transport{
 			Source: ts,
 		}
 		server := newMockServer(func(w http.ResponseWriter, r *http.Request) {
@@ -88,14 +91,14 @@ func TestTransportTokenSourceTypes(t *testing.T) {
 }
 
 func TestTokenValidNoAccessToken(t *testing.T) {
-	token := &Token{}
+	token := &oauth2.Token{}
 	if token.Valid() {
 		t.Errorf("got valid with no access token; want invalid")
 	}
 }
 
 func TestExpiredWithExpiry(t *testing.T) {
-	token := &Token{
+	token := &oauth2.Token{
 		Expiry: time.Now().Add(-5 * time.Hour),
 	}
 	if token.Valid() {

@@ -1,77 +1,37 @@
 # OAuth2 for Go
 
-[![Build Status](https://travis-ci.org/golang/oauth2.svg?branch=master)](https://travis-ci.org/golang/oauth2)
-[![GoDoc](https://godoc.org/golang.org/x/oauth2?status.svg)](https://godoc.org/golang.org/x/oauth2)
+[![GoDoc](https://godoc.org/github.com/jfcote87/oauth2?status.svg)](https://godoc.org/github.com/jfcote87/oauth2)
 
-oauth2 package contains a client implementation for OAuth 2.0 spec.
+oauth2 package is forked from golang.org/x/oauth2.  The major change is the handling of contexts.
+Context for requesting tokens is taken from the http.request rather than stored in the
+TokenSource.  This allows for a TokenSource to exist accross contexts (and therefore threads).
+
+The IDSecretInBody flag is added to the endpoint definition to replace "brokenAuthHeaderProviders"
+logic.
+
+Issues that are resolved in this implementation includ
+
+https://github.com/golang/oauth2/issues/223 all: find a better way to set a custom HTTP client
+
+https://github.com/golang/oauth2/issues/262 TokenSource. Token method should take in a Context
+
+https://github.com/golang/oauth2/issues/198 google: no way to set jws.PrivateClaims (needed for Firebase)
+
+https://github.com/golang/oauth2/issues/198 Token expiration tolerance should be configurable #249
+
+https://github.com/golang/oauth2/issues/256 OAuth2: Ability to specify "audience" parameter to token refresh #256
+
+https://github.com/golang/oauth2/issues/84 CacheToken/transport confusion
+
+See https://github.com/golang/oauth2/issues/223
+ In the  a client implementation for OAuth 2.0 spec.
+
+ google: remove dependency to cloud.google.com/go/compute #227
 
 ## Installation
 
 ~~~~
-go get golang.org/x/oauth2
+go get github.com/jfcote87/oauth2
 ~~~~
 
-Or you can manually git clone the repository to
-`$(go env GOPATH)/src/golang.org/x/oauth2`.
 
-See godoc for further documentation and examples.
-
-* [godoc.org/golang.org/x/oauth2](http://godoc.org/golang.org/x/oauth2)
-* [godoc.org/golang.org/x/oauth2/google](http://godoc.org/golang.org/x/oauth2/google)
-
-
-## App Engine
-
-In change 96e89be (March 2015), we removed the `oauth2.Context2` type in favor
-of the [`context.Context`](https://golang.org/x/net/context#Context) type from
-the `golang.org/x/net/context` package
-
-This means it's no longer possible to use the "Classic App Engine"
-`appengine.Context` type with the `oauth2` package. (You're using
-Classic App Engine if you import the package `"appengine"`.)
-
-To work around this, you may use the new `"google.golang.org/appengine"`
-package. This package has almost the same API as the `"appengine"` package,
-but it can be fetched with `go get` and used on "Managed VMs" and well as
-Classic App Engine.
-
-See the [new `appengine` package's readme](https://github.com/golang/appengine#updating-a-go-app-engine-app)
-for information on updating your app.
-
-If you don't want to update your entire app to use the new App Engine packages,
-you may use both sets of packages in parallel, using only the new packages
-with the `oauth2` package.
-
-```go
-import (
-	"golang.org/x/net/context"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
-	newappengine "google.golang.org/appengine"
-	newurlfetch "google.golang.org/appengine/urlfetch"
-
-	"appengine"
-)
-
-func handler(w http.ResponseWriter, r *http.Request) {
-	var c appengine.Context = appengine.NewContext(r)
-	c.Infof("Logging a message with the old package")
-
-	var ctx context.Context = newappengine.NewContext(r)
-	client := &http.Client{
-		Transport: &oauth2.Transport{
-			Source: google.AppEngineTokenSource(ctx, "scope"),
-			Base:   &newurlfetch.Transport{Context: ctx},
-		},
-	}
-	client.Get("...")
-}
-```
-
-## Report Issues / Send Patches
-
-This repository uses Gerrit for code changes. To learn how to submit changes to
-this repository, see https://golang.org/doc/contribute.html.
-
-The main issue tracker for the oauth2 repository is located at
-https://github.com/golang/oauth2/issues.

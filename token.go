@@ -5,20 +5,22 @@
 package oauth2
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"mime"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/jfcote87/oauth2/internal"
-	"golang.org/x/net/context"
+	"github.com/jfcote87/ctxclient"
 )
-
-// expiryDelta determines how earlier a token should be considered
-// expired than its actual expiration time. It is used to avoid late
-// expirations due to client-server time mismatches.
-const expiryDelta = 10 * time.Second
 
 // Token represents the crendentials used to authorize
 // the requests to access protected resources on the OAuth 2.0
@@ -53,21 +55,76 @@ type Token struct {
 	raw interface{}
 }
 
+// DefaultExpiryDelta determines the number of seconds  a token should
+// expire sooner than the delivered expiration time. This avoids late
+// expirations due to client-server time mismatches and latency.
+const DefaultExpiryDelta = 10
+
+var intType = reflect.TypeOf(int64(0))
+
+// FromMap returns a token from a map[string]interface{}
+func FromMap(vals map[string]interface{}, expiryDelta int64) (*Token, error) {
+	t := &Token{
+		raw: vals,
+	}
+	if expiryDelta == 0 {
+		expiryDelta = DefaultExpiryDelta
+	}
+	var expSeconds int64
+	for k, v := range vals {
+		switch typedVal := v.(type) {
+		case string:
+			switch k {
+			case "access_token":
+				t.AccessToken = typedVal
+			case "refresh_token":
+				t.RefreshToken = typedVal
+			case "token_type":
+				t.TokenType = typedVal
+			case "expires_in": // PayPal returns string so check for it here
+				dur, err := strconv.ParseInt(typedVal, 10, 64)
+				if err != nil {
+					return nil, err
+				}
+				expSeconds = dur
+			}
+		default:
+			switch k {
+			case "expires_in":
+				if v == nil { // check for nil to prevent panic on reflect.Indirect
+					return nil, fmt.Errorf("unable to convert %s to int64: %v", k, v)
+				}
+				rv := reflect.Indirect(reflect.ValueOf(v))
+				if !rv.Type().ConvertibleTo(intType) {
+					return nil, fmt.Errorf("unable to convert %s to int64: %v", k, v)
+				}
+				expSeconds = rv.Convert(intType).Int()
+			case "access_token", "refresh_token", "token_type":
+				return nil, fmt.Errorf("%s must be a string; got %v", k, v)
+			}
+		}
+	}
+	if expSeconds > 0 {
+		t.Expiry = time.Now().Add(time.Duration(expSeconds-expiryDelta) * time.Second)
+	}
+
+	return t, nil
+}
+
 // Type returns t.TokenType if non-empty, else "Bearer".
 func (t *Token) Type() string {
-	if strings.EqualFold(t.TokenType, "bearer") {
+	if t.TokenType == "" {
 		return "Bearer"
 	}
-	if strings.EqualFold(t.TokenType, "mac") {
+	switch strings.ToLower(t.TokenType) {
+	case "bearer":
+		return "Bearer"
+	case "mac":
 		return "MAC"
-	}
-	if strings.EqualFold(t.TokenType, "basic") {
+	case "basic":
 		return "Basic"
 	}
-	if t.TokenType != "" {
-		return t.TokenType
-	}
-	return "Bearer"
+	return t.TokenType
 }
 
 // SetAuthHeader sets the Authorization header to r using the access
@@ -84,7 +141,9 @@ func (t *Token) SetAuthHeader(r *http.Request) {
 // implementing derivative OAuth2 flows.
 func (t *Token) WithExtra(extra interface{}) *Token {
 	t2 := new(Token)
-	*t2 = *t
+	if t != nil { // nil check
+		*t2 = *t
+	}
 	t2.raw = extra
 	return t2
 }
@@ -123,7 +182,7 @@ func (t *Token) expired() bool {
 	if t.Expiry.IsZero() {
 		return false
 	}
-	return t.Expiry.Add(-expiryDelta).Before(time.Now())
+	return t.Expiry.Before(time.Now())
 }
 
 // Valid reports whether t is non-nil, has an AccessToken, and is not expired.
@@ -131,32 +190,47 @@ func (t *Token) Valid() bool {
 	return t != nil && t.AccessToken != "" && !t.expired()
 }
 
-// tokenFromInternal maps an *internal.Token struct into
-// a *Token struct.
-func tokenFromInternal(t *internal.Token) *Token {
-	if t == nil {
-		return nil
+// RetrieveToken returns a token
+func RetrieveToken(ctx context.Context, hcf ctxclient.Func, clientID, clientSecret, tokenURL string, v url.Values, expiryDelta int64) (*Token, error) {
+	req, err := http.NewRequest("POST", tokenURL, strings.NewReader(v.Encode()))
+	if err != nil {
+		return nil, err
 	}
-	return &Token{
-		AccessToken:  t.AccessToken,
-		TokenType:    t.TokenType,
-		RefreshToken: t.RefreshToken,
-		Expiry:       t.Expiry,
-		raw:          t.Raw,
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if clientID > "" {
+		req.SetBasicAuth(url.QueryEscape(clientID), url.QueryEscape(clientSecret))
 	}
-}
+	var body []byte
+	r, err := hcf.Do(ctx, req)
+	switch ex := err.(type) {
+	case nil:
+		body, err = ioutil.ReadAll(io.LimitReader(r.Body, 1<<20))
+		r.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("oauth2: token body read error:  %v", err)
+		}
+	case ctxclient.NotSuccess:
+		return nil, fmt.Errorf("oauth2: cannot fetch token: %d %s: %s", ex.StatusCode, ex.StatusMessage, string(ex.Body))
+	default:
+		return nil, fmt.Errorf("oauth2: cannot fetch token: %v", err)
+	}
 
-// retrieveToken takes a *Config and uses that to retrieve an *internal.Token.
-// This token is then mapped from *internal.Token into an *oauth2.Token which is returned along
-// with an error..
-func retrieveToken(ctx context.Context, c *Config, v url.Values) (*Token, error) {
-	hc, err := internal.ContextClient(ctx)
-	if err != nil {
-		return nil, err
+	//var token *Token
+	mappedValues := make(map[string]interface{})
+	content, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	switch content {
+	case "application/x-www-form-urlencoded", "text/plain":
+		vals, err := url.ParseQuery(string(body))
+		if err != nil {
+			return nil, err
+		}
+		for k := range vals {
+			mappedValues[k] = vals.Get(k)
+		}
+	default:
+		if err := json.NewDecoder(bytes.NewReader(body)).Decode(&mappedValues); err != nil {
+			return nil, err
+		}
 	}
-	tk, err := internal.RetrieveToken(ctx, hc, c.ClientID, c.ClientSecret, c.Endpoint.TokenURL, v)
-	if err != nil {
-		return nil, err
-	}
-	return tokenFromInternal(tk), nil
+	return FromMap(mappedValues, expiryDelta)
 }

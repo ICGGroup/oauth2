@@ -5,9 +5,11 @@
 package google
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/user"
@@ -16,9 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/net/context"
 	"github.com/jfcote87/oauth2"
-	"github.com/jfcote87/oauth2/internal"
 )
 
 type sdkCredentials struct {
@@ -76,7 +76,7 @@ func NewSDKConfig(account string) (*SDKConfig, error) {
 			return nil, fmt.Errorf("oauth2/google: failed to load SDK properties: %v", err)
 		}
 		defer f.Close()
-		ini, err := internal.ParseINI(f)
+		ini, err := ParseINI(f)
 		if err != nil {
 			return nil, fmt.Errorf("oauth2/google: failed to parse SDK properties %q: %v", propertiesPath, err)
 		}
@@ -124,12 +124,9 @@ func NewSDKConfig(account string) (*SDKConfig, error) {
 // underlying http.RoundTripper will be obtained using the provided
 // context. The returned client and its Transport should not be
 // modified.
-func (c *SDKConfig) Client(ctx context.Context) *http.Client {
-	return &http.Client{
-		Transport: &oauth2.Transport{
-			Source: c.TokenSource(ctx),
-		},
-	}
+// TODO: need some type of client context here
+func (c *SDKConfig) Client() *http.Client {
+	return oauth2.Client(c.TokenSource(), nil)
 }
 
 // TokenSource returns an oauth2.TokenSource that retrieve tokens from
@@ -137,13 +134,24 @@ func (c *SDKConfig) Client(ctx context.Context) *http.Client {
 // It will returns the current access token stored in the credentials,
 // and refresh it when it expires, but it won't update the credentials
 // with the new access token.
-func (c *SDKConfig) TokenSource(ctx context.Context) oauth2.TokenSource {
-	return c.conf.TokenSource(ctx, c.initialToken)
+func (c *SDKConfig) TokenSource() oauth2.TokenSource {
+	return c.conf.TokenSource(c.initialToken)
 }
 
 // Scopes are the OAuth 2.0 scopes the current account is authorized for.
 func (c *SDKConfig) Scopes() []string {
 	return c.conf.Scopes
+}
+
+// InitialToken return the config's token found in glcoud config
+func (c *SDKConfig) InitialToken() *oauth2.Token {
+	return c.initialToken
+}
+
+// SetSDKConfigPathFunc overwrites the function the looks up the
+// gcloud config location.  May be used during testing or in init()
+func SetSDKConfigPathFunc(f func() (string, error)) {
+	sdkConfigPath = f
 }
 
 // sdkConfigPath tries to guess where the gcloud config is located.
@@ -169,4 +177,33 @@ func guessUnixHomeDir() string {
 		return u.HomeDir
 	}
 	return ""
+}
+
+// ParseINI transforms the CloudSDK ini file into a map
+func ParseINI(ini io.Reader) (map[string]map[string]string, error) {
+	result := map[string]map[string]string{
+		"": {}, // root section
+	}
+	scanner := bufio.NewScanner(ini)
+	currentSection := ""
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, ";") {
+			// comment.
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			currentSection = strings.TrimSpace(line[1 : len(line)-1])
+			result[currentSection] = map[string]string{}
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 && parts[0] != "" {
+			result[currentSection][strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error scanning ini: %v", err)
+	}
+	return result, nil
 }

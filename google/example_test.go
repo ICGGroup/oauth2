@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// +build appenginevm appengine
-
 package google_test
 
 import (
@@ -15,8 +13,6 @@ import (
 	"github.com/jfcote87/oauth2"
 	"github.com/jfcote87/oauth2/google"
 	"github.com/jfcote87/oauth2/jwt"
-	"google.golang.org/appengine"
-	"google.golang.org/appengine/urlfetch"
 )
 
 func ExampleDefaultClient() {
@@ -51,7 +47,7 @@ func Example_webServer() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	client := conf.Client(oauth2.NoContext, tok)
+	client := conf.Client(tok)
 	client.Get("...")
 }
 
@@ -74,7 +70,7 @@ func ExampleJWTConfigFromJSON() {
 	// Initiate an http.Client. The following GET request will be
 	// authorized and authenticated on the behalf of
 	// your service account.
-	client := conf.Client(oauth2.NoContext)
+	client, _ := conf.Client(nil)
 	client.Get("...")
 }
 
@@ -87,14 +83,14 @@ func ExampleSDKConfig() {
 	}
 	// Initiate an http.Client. The following GET request will be
 	// authorized and authenticated on the behalf of the SDK user.
-	client := conf.Client(oauth2.NoContext)
+	client := conf.Client()
 	client.Get("...")
 }
 
 func Example_serviceAccount() {
 	// Your credentials should be obtained from the Google
 	// Developer Console (https://console.developers.google.com).
-	conf := &jwt.Config{
+	conf := &jwt.LegacyConfig{
 		Email: "xxx@developer.gserviceaccount.com",
 		// The contents of your RSA private key or your PEM file
 		// that contains a private key.
@@ -119,21 +115,7 @@ func Example_serviceAccount() {
 	}
 	// Initiate an http.Client, the following GET request will be
 	// authorized and authenticated on the behalf of user@example.com.
-	client := conf.Client(oauth2.NoContext)
-	client.Get("...")
-}
-
-func ExampleAppEngineTokenSource() {
-	var req *http.Request // from the ServeHTTP handler
-	ctx := appengine.NewContext(req)
-	client := &http.Client{
-		Transport: &oauth2.Transport{
-			Source: google.AppEngineTokenSource(ctx, "https://www.googleapis.com/auth/bigquery"),
-			Base: &urlfetch.Transport{
-				Context: ctx,
-			},
-		},
-	}
+	client, _ := conf.Client(nil)
 	client.Get("...")
 }
 
@@ -143,8 +125,22 @@ func ExampleComputeTokenSource() {
 			// Fetch from Google Compute Engine's metadata server to retrieve
 			// an access token for the provided account.
 			// If no account is specified, "default" is used.
-			Source: google.ComputeTokenSource(""),
+			// If no scopes are specified, a set of default scopes
+			// are automatically granted.
+			Source: google.ComputeTokenSource("", "https://www.googleapis.com/auth/bigquery"),
 		},
 	}
 	client.Get("...")
+}
+
+func ExampleCredentialsFromJSON() {
+	data, err := ioutil.ReadFile("/path/to/key-file.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+	creds, err := google.CredentialsFromJSON(data, "https://www.googleapis.com/auth/bigquery")
+	if err != nil {
+		log.Fatal(err)
+	}
+	_ = creds // TODO: Use creds.
 }
