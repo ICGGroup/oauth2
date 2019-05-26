@@ -15,10 +15,8 @@ package clientcredentials // import "github.com/jfcote87/oauth2/clientcredential
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/jfcote87/ctxclient"
 	"github.com/jfcote87/oauth2"
@@ -41,6 +39,13 @@ type Config struct {
 	Scopes []string
 
 	// EndpointParams specifies additional parameters for requests to the token endpoint.
+	// Password-based authentication (https://tools.ietf.org/html/rfc6749#section-4.3) may
+	// be implemented by setting EndpointParams to -
+	// url.Values{
+	//	"grant_type": {"password"},
+	//	"username":   {<username>},
+	//	"password":   {<password>},
+	// }
 	EndpointParams url.Values
 
 	// ExpiryDelta determines how man seconds sooner a token should
@@ -58,7 +63,7 @@ type Config struct {
 // HTTP transport by requests contexts.
 // The returned client and its Transport should not be modified.
 func (c *Config) Client(t *oauth2.Token) (*http.Client, error) {
-	return oauth2.Client(c.TokenSource(t), nil), nil
+	return oauth2.Client(c.TokenSource(t), c.HTTPClientFunc), nil
 }
 
 // TokenSource returns a TokenSource that returns t until t expires,
@@ -67,7 +72,25 @@ func (c *Config) Client(t *oauth2.Token) (*http.Client, error) {
 //
 // Most users will use Config.Client instead.
 func (c *Config) TokenSource(t *oauth2.Token) oauth2.TokenSource {
-	return oauth2.ReuseTokenSource(t, c)
+	return oauth2.ReuseTokenSource(t, c.source())
+}
+
+func (c *Config) source() oauth2.TokenSource {
+	oc := &oauth2.Config{
+		ClientID:       c.ClientID,
+		ClientSecret:   c.ClientSecret,
+		Endpoint:       oauth2.Endpoint{TokenURL: c.TokenURL},
+		Scopes:         c.Scopes,
+		ExpiryDelta:    c.ExpiryDelta,
+		HTTPClientFunc: c.HTTPClientFunc,
+	}
+	opts := []oauth2.AuthCodeOption{
+		oauth2.SetAuthURLParam("grant_type", "client_credentials"),
+	}
+	for k := range c.EndpointParams {
+		opts = append(opts, oauth2.SetAuthURLParam(k, c.EndpointParams.Get(k)))
+	}
+	return oc.FromOptions(opts...)
 }
 
 // Token refreshes the token by using a new client credentials request.
@@ -76,18 +99,5 @@ func (c *Config) TokenSource(t *oauth2.Token) oauth2.TokenSource {
 // caching tokensource.  Use the tokensource create by
 // Config.TokenSource.
 func (c *Config) Token(ctx context.Context) (*oauth2.Token, error) {
-	v := url.Values{
-		"grant_type": {"client_credentials"},
-	}
-	if len(c.Scopes) > 0 {
-		v["scope"] = []string{strings.Join(c.Scopes, " ")}
-	}
-	for k, p := range c.EndpointParams {
-		if _, ok := v[k]; ok {
-			return nil, fmt.Errorf("oauth2: cannot overwrite parameter %q", k)
-		}
-		v[k] = p
-	}
-	return oauth2.RetrieveToken(ctx, c.HTTPClientFunc, c.ClientID, c.ClientSecret, c.TokenURL, v, c.ExpiryDelta)
-
+	return c.TokenSource(nil).Token(ctx)
 }

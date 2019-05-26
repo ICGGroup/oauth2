@@ -10,7 +10,13 @@ package oauth2
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"mime"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -141,27 +147,19 @@ func (c *Config) AuthCodeURL(state string, opts ...AuthCodeOption) string {
 	return buf.String()
 }
 
-// PasswordCredentialsToken converts a resource owner username and password
-// pair into a token.
-//
-// Per the RFC, this grant type should only be used "when there is a high
-// degree of trust between the resource owner and the client (e.g., the client
-// is part of the device operating system or a highly privileged application),
-// and when other authorization grant types are not available."
-// See https://tools.ietf.org/html/rfc6749#section-4.3 for more info.
-//
-// The HTTP client to use is derived from the context.
-// If nil, http.DefaultClient is used.
-func (c *Config) PasswordCredentialsToken(ctx context.Context, username, password string) (*Token, error) {
-	v := url.Values{
-		"grant_type": {"password"},
-		"username":   {username},
-		"password":   {password},
+// FromOptions returns a TokenSource that retrieves tokens using the
+// parameters defined in opts.  Used by clientcredentials package.
+func (c *Config) FromOptions(opts ...AuthCodeOption) TokenSource {
+	v := make(url.Values)
+	for _, o := range opts {
+		o.setValue(v)
 	}
 	if len(c.Scopes) > 0 {
 		v.Set("scope", strings.Join(c.Scopes, " "))
 	}
-	return c.retrieveToken(ctx, v)
+	return tokenRefreshFunc(func(ctx context.Context) (*Token, error) {
+		return c.retrieveToken(ctx, v)
+	})
 }
 
 // Exchange converts an authorization code into a token.
@@ -208,27 +206,13 @@ func (c *Config) RefreshToken(ctx context.Context, refreshToken string) (*Token,
 	})
 }
 
-// tokenRefresher is a TokenSource that makes "grant_type"=="refresh_token"
-// HTTP requests to renew a token using a RefreshToken.
-type tokenRefresher struct {
-	conf         *Config
-	refreshToken string
-}
+type tokenRefreshFunc func(context.Context) (*Token, error)
 
-// WARNING: Token is not safe for concurrent access, as it
-// updates the tokenRefresher's refreshToken field.
-// Within this package, it is used by cachedToken which
-// synchronizes calls to this method with its own mutex.
-func (ctr *tokenRefresher) Token(ctx context.Context) (*Token, error) {
-	if ctr.refreshToken == "" {
-		return nil, errors.New("oauth2: token expired and refresh token is not set")
+func (trf tokenRefreshFunc) Token(ctx context.Context) (*Token, error) {
+	if trf == nil {
+		return nil, errors.New("nil tokenRefreshFunc")
 	}
-	tk, err := ctr.conf.RefreshToken(ctx, ctr.refreshToken)
-	if err == nil && tk != nil && tk.RefreshToken > "" && ctr.refreshToken != tk.RefreshToken {
-		// if new refresh token, update cache
-		ctr.refreshToken = tk.RefreshToken
-	}
-	return tk, err
+	return trf(ctx)
 }
 
 // cachedToken is a TokenSource that holds a single token in memory
@@ -270,6 +254,9 @@ func (s *cachedToken) Token(ctx context.Context) (*Token, error) {
 // wrapped in a caching version if it isn't one already. This also
 // means it's always safe to wrap ReuseTokenSource around any other
 // TokenSource without adverse effects.
+//
+// ReuseTokenSource uses a mutex to allow the returned TokenSource
+// to be used concurrently.
 func ReuseTokenSource(t *Token, src TokenSource) TokenSource {
 	// Don't wrap a reuseTokenSource in itself. That would work,
 	// but cause an unnecessary number of mutex operations.
@@ -295,10 +282,24 @@ func (c *Config) TokenSource(t *Token) TokenSource {
 	if t != nil {
 		refreshToken = t.RefreshToken
 	}
-	return ReuseTokenSource(t, &tokenRefresher{
-		conf:         c,
-		refreshToken: refreshToken,
-	})
+	tfr := func(ctx context.Context) (*Token, error) {
+		if c == nil {
+			return nil, errors.New("nil config")
+		}
+		if refreshToken == "" {
+			return nil, errors.New("empty refresh token")
+		}
+		tk, err := c.RefreshToken(ctx, refreshToken)
+		if err != nil {
+			return nil, err
+		}
+		if tk != nil && tk.RefreshToken > "" && tk.RefreshToken != refreshToken {
+			refreshToken = tk.RefreshToken
+		}
+		return tk, nil
+	}
+	// ReuseTokenSource's mutex will protect refreshToken during concurrent operations
+	return ReuseTokenSource(t, tokenRefreshFunc(tfr))
 }
 
 // StaticTokenSource returns a TokenSource that always returns the same token.
@@ -325,5 +326,62 @@ func (c *Config) retrieveToken(ctx context.Context, v url.Values) (*Token, error
 		v.Set("client_secret", c.ClientSecret)
 		clientID, clientSecret = "", ""
 	}
-	return RetrieveToken(ctx, c.HTTPClientFunc, clientID, clientSecret, c.Endpoint.TokenURL, v, c.ExpiryDelta)
+	req, err := http.NewRequest("POST", c.Endpoint.TokenURL, strings.NewReader(v.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if clientID > "" {
+		req.SetBasicAuth(url.QueryEscape(clientID), url.QueryEscape(clientSecret))
+	}
+	var body []byte
+	r, err := c.HTTPClientFunc.Do(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("oauth2: cannot fetch token: %v", err)
+	}
+	body, err = ioutil.ReadAll(io.LimitReader(r.Body, 1<<20))
+	r.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("oauth2: token body read error:  %v", err)
+	}
+
+	//var token *Token
+	mappedValues := make(map[string]interface{})
+	content, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	switch content {
+	case "application/x-www-form-urlencoded", "text/plain":
+		vals, err := url.ParseQuery(string(body))
+		if err != nil {
+			return nil, err
+		}
+		for k := range vals {
+			mappedValues[k] = vals.Get(k)
+		}
+	default:
+		if err := json.NewDecoder(bytes.NewReader(body)).Decode(&mappedValues); err != nil {
+			return nil, err
+		}
+	}
+	return fromMap(mappedValues, c.ExpiryDelta)
+}
+
+// Client returns an HTTP client using the provided token.
+// The token will auto-refresh as necessary. The underlying
+// Client returns an HTTP client using the provided token.
+// HTTP transport will be obtained using Config.HTTPClient.
+// The returned client and its Transport should not be modified.
+//
+// The returned client uses the request's context to handle
+// timeouts and cancellations.  It may be used concurrently
+// as the token refresh is protected
+func (c *Config) Client(t *Token) *http.Client {
+	if c == nil {
+		return nil
+	}
+	return &http.Client{
+		Transport: &Transport{
+			Source: c.TokenSource(t),
+			Func:   c.HTTPClientFunc,
+		},
+	}
 }

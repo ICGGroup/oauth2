@@ -7,9 +7,9 @@
 package google
 
 import (
-	"github.com/jfcote87/oauth2"
-
 	"context"
+
+	"github.com/jfcote87/oauth2"
 )
 
 // Credentials holds Google credentials, including "Application Default Credentials".

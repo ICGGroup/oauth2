@@ -411,7 +411,11 @@ func TestPasswordCredentialsTokenRequest(t *testing.T) {
 	}))
 	defer ts.Close()
 	conf := newConf(ts.URL)
-	tok, err := conf.PasswordCredentialsToken(context.Background(), "user1", "password1")
+
+	tsrc := conf.FromOptions(oauth2.SetAuthURLParam("grant_type", "password"),
+		oauth2.SetAuthURLParam("username", "user1"),
+		oauth2.SetAuthURLParam("password", "password1"))
+	tok, err := tsrc.Token(context.Background())
 	if err != nil {
 		t.Error(err)
 	}

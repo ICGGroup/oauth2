@@ -5,21 +5,13 @@
 package oauth2
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"io/ioutil"
-	"mime"
 	"net/http"
 	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/jfcote87/ctxclient"
 )
 
 // Token represents the crendentials used to authorize
@@ -62,8 +54,8 @@ const DefaultExpiryDelta = 10
 
 var intType = reflect.TypeOf(int64(0))
 
-// FromMap returns a token from a map[string]interface{}
-func FromMap(vals map[string]interface{}, expiryDelta int64) (*Token, error) {
+// fromMap returns a token from a map[string]interface{}
+func fromMap(vals map[string]interface{}, expiryDelta int64) (*Token, error) {
 	t := &Token{
 		raw: vals,
 	}
@@ -188,49 +180,4 @@ func (t *Token) expired() bool {
 // Valid reports whether t is non-nil, has an AccessToken, and is not expired.
 func (t *Token) Valid() bool {
 	return t != nil && t.AccessToken != "" && !t.expired()
-}
-
-// RetrieveToken returns a token
-func RetrieveToken(ctx context.Context, hcf ctxclient.Func, clientID, clientSecret, tokenURL string, v url.Values, expiryDelta int64) (*Token, error) {
-	req, err := http.NewRequest("POST", tokenURL, strings.NewReader(v.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if clientID > "" {
-		req.SetBasicAuth(url.QueryEscape(clientID), url.QueryEscape(clientSecret))
-	}
-	var body []byte
-	r, err := hcf.Do(ctx, req)
-	switch ex := err.(type) {
-	case nil:
-		body, err = ioutil.ReadAll(io.LimitReader(r.Body, 1<<20))
-		r.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("oauth2: token body read error:  %v", err)
-		}
-	case ctxclient.NotSuccess:
-		return nil, fmt.Errorf("oauth2: cannot fetch token: %d %s: %s", ex.StatusCode, ex.StatusMessage, string(ex.Body))
-	default:
-		return nil, fmt.Errorf("oauth2: cannot fetch token: %v", err)
-	}
-
-	//var token *Token
-	mappedValues := make(map[string]interface{})
-	content, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	switch content {
-	case "application/x-www-form-urlencoded", "text/plain":
-		vals, err := url.ParseQuery(string(body))
-		if err != nil {
-			return nil, err
-		}
-		for k := range vals {
-			mappedValues[k] = vals.Get(k)
-		}
-	default:
-		if err := json.NewDecoder(bytes.NewReader(body)).Decode(&mappedValues); err != nil {
-			return nil, err
-		}
-	}
-	return FromMap(mappedValues, expiryDelta)
 }

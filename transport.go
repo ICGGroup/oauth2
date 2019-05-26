@@ -13,27 +13,6 @@ import (
 	"github.com/jfcote87/ctxclient"
 )
 
-// Client returns an HTTP client using the provided token.
-// The token will auto-refresh as necessary. The underlying
-// Client returns an HTTP client using the provided token.
-// HTTP transport will be obtained using Config.HTTPClient.
-// The returned client and its Transport should not be modified.
-//
-// The returned client uses the request's context to handle
-// timeouts and cancellations.  It may be used concurrently
-// as the token refresh is protected
-func (c *Config) Client(t *Token) *http.Client {
-	if c == nil {
-		return nil
-	}
-	return &http.Client{
-		Transport: &Transport{
-			Source: c.TokenSource(t),
-			Func:   c.HTTPClientFunc,
-		},
-	}
-}
-
 // Client creates a client that sets an authorization
 // header based on tokens created by the ctxtokensource ts.
 func Client(ts TokenSource, f ctxclient.Func) *http.Client {
