@@ -90,7 +90,7 @@ func ExampleSDKConfig() {
 func Example_serviceAccount() {
 	// Your credentials should be obtained from the Google
 	// Developer Console (https://console.developers.google.com).
-	conf := &jwt.ProjectCfg{
+	conf := &jwt.ServiceAccount{
 		Email: "xxx@developer.gserviceaccount.com",
 		// The contents of your RSA private key or your PEM file
 		// that contains a private key.

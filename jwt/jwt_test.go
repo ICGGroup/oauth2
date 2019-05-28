@@ -322,8 +322,8 @@ func TestConfigOptions(t *testing.T) {
 	}
 }
 
-func TestProjectCfg(t *testing.T) {
-	cfg := jwt.ProjectCfg{
+func TestServiceAccount(t *testing.T) {
+	cfg := jwt.ServiceAccount{
 		Email:        "abc@example.com",
 		PrivateKey:   []byte("bad key"),
 		PrivateKeyID: "KEY ID",
@@ -333,17 +333,17 @@ func TestProjectCfg(t *testing.T) {
 	}
 	newcfg, err := cfg.Config()
 	if err == nil {
-		t.Errorf("ProjectCfg expected invalid key; got success")
+		t.Errorf("ServiceAccount expected invalid key; got success")
 		return
 	}
 	cfg.PrivateKey = dummyPrivateKey
 	if newcfg, err = cfg.Config(); err != nil {
-		t.Errorf("ProjectCfg.Config() expected success; got %v", err)
+		t.Errorf("ServiceAccount.Config() expected success; got %v", err)
 		return
 	}
 	exp, _, iat := newcfg.Expiration.Values()
 	if newcfg.Expiration == nil || exp != int64(cfg.Expires/time.Second) || iat != 10 {
-		t.Errorf("ProjectCfg.Config expected &jwt.ExpirationSetting{Expires:1800000000000, ExpiryDelta:0, IatOffset:10000000000}; got %#v", newcfg.Expiration)
+		t.Errorf("ServiceAccount.Config expected &jwt.ExpirationSetting{Expires:1800000000000, ExpiryDelta:0, IatOffset:10000000000}; got %#v", newcfg.Expiration)
 	}
 }
 
