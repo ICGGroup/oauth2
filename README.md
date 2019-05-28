@@ -4,7 +4,8 @@
 
 oauth2 package is forked from golang.org/x/oauth2.  The major change is the handling of contexts.
 Context for requesting tokens is taken from the http.request rather than stored in the
-TokenSource.  This allows for a TokenSource to exist accross contexts (and therefore threads).
+TokenSource.  This allows for a TokenSource to exist accross contexts and, when wrapped
+by ReuseTokenSource func, to be safe for concurrent use.
 
 The IDSecretInBody flag is added to the endpoint definition to replace "brokenAuthHeaderProviders"
 logic.
@@ -22,11 +23,7 @@ https://github.com/golang/oauth2/issues/198 Token expiration tolerance should be
 https://github.com/golang/oauth2/issues/256 OAuth2: Ability to specify "audience" parameter to token refresh #256
 
 https://github.com/golang/oauth2/issues/84 CacheToken/transport confusion
-
-See https://github.com/golang/oauth2/issues/223
- In the  a client implementation for OAuth 2.0 spec.
-
- google: remove dependency to cloud.google.com/go/compute #227
+ 
 
 ## Installation
 

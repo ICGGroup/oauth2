@@ -12,9 +12,10 @@ import (
 	"github.com/jfcote87/oauth2/jws"
 )
 
-// LegacyConfig has the same structure as the golang.org/x/oauth2/jwt Config
-// struct. Use LegacyConfig.Config() to convert to new style.
-type LegacyConfig struct {
+// ProjectCfg conforms to the json format of a Google Service Account Key and has 
+// the same structure as the golang.org/x/oauth2/jwt Config struct. 
+// Use ProjectCfg.Config() to convert to jwt.Config.
+type ProjectCfg struct {
 	// Email is the OAuth client identifier used when communicating with
 	// the configured OAuth provider.
 	Email string `json:"client_email,omitempty"`
@@ -46,8 +47,8 @@ type LegacyConfig struct {
 	Expires time.Duration `json:"expires,omitempty"`
 }
 
-// Config translates the LegacyConfig settings to a jwt.Config
-func (cfg LegacyConfig) Config() (*Config, error) {
+// Config translates the ProjectCfg settings to a jwt.Config
+func (cfg ProjectCfg) Config() (*Config, error) {
 	signer, err := jws.RS256FromPEM(cfg.PrivateKey, cfg.PrivateKeyID)
 	if err != nil {
 		return nil, err
@@ -69,7 +70,7 @@ func (cfg LegacyConfig) Config() (*Config, error) {
 
 // Client returns a *jwt.Config client with the passed token.  Error
 // returned if problems found with the private key
-func (cfg LegacyConfig) Client(tk *oauth2.Token) (*http.Client, error) {
+func (cfg ProjectCfg) Client(tk *oauth2.Token) (*http.Client, error) {
 	jcfg, err := cfg.Config()
 	if err != nil {
 		return nil, err
