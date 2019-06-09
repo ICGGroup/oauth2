@@ -50,58 +50,7 @@ type Token struct {
 // DefaultExpiryDelta determines the number of seconds  a token should
 // expire sooner than the delivered expiration time. This avoids late
 // expirations due to client-server time mismatches and latency.
-const DefaultExpiryDelta = 10
-
-var intType = reflect.TypeOf(int64(0))
-
-// fromMap returns a token from a map[string]interface{}
-func fromMap(vals map[string]interface{}, expiryDelta int64) (*Token, error) {
-	t := &Token{
-		raw: vals,
-	}
-	if expiryDelta == 0 {
-		expiryDelta = DefaultExpiryDelta
-	}
-	var expSeconds int64
-	for k, v := range vals {
-		switch typedVal := v.(type) {
-		case string:
-			switch k {
-			case "access_token":
-				t.AccessToken = typedVal
-			case "refresh_token":
-				t.RefreshToken = typedVal
-			case "token_type":
-				t.TokenType = typedVal
-			case "expires_in": // PayPal returns string so check for it here
-				dur, err := strconv.ParseInt(typedVal, 10, 64)
-				if err != nil {
-					return nil, err
-				}
-				expSeconds = dur
-			}
-		default:
-			switch k {
-			case "expires_in":
-				if v == nil { // check for nil to prevent panic on reflect.Indirect
-					return nil, fmt.Errorf("unable to convert %s to int64: %v", k, v)
-				}
-				rv := reflect.Indirect(reflect.ValueOf(v))
-				if !rv.Type().ConvertibleTo(intType) {
-					return nil, fmt.Errorf("unable to convert %s to int64: %v", k, v)
-				}
-				expSeconds = rv.Convert(intType).Int()
-			case "access_token", "refresh_token", "token_type":
-				return nil, fmt.Errorf("%s must be a string; got %v", k, v)
-			}
-		}
-	}
-	if expSeconds > 0 {
-		t.Expiry = time.Now().Add(time.Duration(expSeconds-expiryDelta) * time.Second)
-	}
-
-	return t, nil
-}
+const DefaultExpiryDelta int64 = 10
 
 // Type returns t.TokenType if non-empty, else "Bearer".
 func (t *Token) Type() string {
@@ -144,6 +93,9 @@ func (t *Token) WithExtra(extra interface{}) *Token {
 // Extra fields are key-value pairs returned by the server as a
 // part of the token retrieval response.
 func (t *Token) Extra(key string) interface{} {
+	if t == nil {
+		return nil
+	}
 	if raw, ok := t.raw.(map[string]interface{}); ok {
 		return raw[key]
 	}
@@ -180,4 +132,59 @@ func (t *Token) expired() bool {
 // Valid reports whether t is non-nil, has an AccessToken, and is not expired.
 func (t *Token) Valid() bool {
 	return t != nil && t.AccessToken != "" && !t.expired()
+}
+
+var intType = reflect.TypeOf(int64(0))
+
+// getMapStrings returns string values from map based upon the key with
+// error if any values are not strings and not nil
+func getMapStrings(m map[string]interface{}, keys ...string) ([]string, error) {
+	var results = make([]string, len(keys), len(keys))
+	for i, k := range keys {
+		switch v := m[k].(type) {
+		case nil:
+		case string:
+			results[i] = v
+		default:
+			return results, fmt.Errorf("%s must be a string", k)
+		}
+	}
+	return results, nil
+}
+
+// getDateFromInterfaceconverts calculates a time.Time from the
+// number of seconds indicated by val minus the delta
+func getDateFromInterface(val interface{}, delta time.Duration) (time.Time, error) {
+	var tm time.Time
+	var numOfSeconds int64
+	switch v := val.(type) {
+	case nil:
+		return tm, nil
+	case int64:
+		numOfSeconds = v
+	case float64:
+		numOfSeconds = int64(v)
+	default:
+		rv := reflect.Indirect(reflect.ValueOf(v))
+		if !rv.IsValid() || !rv.Type().ConvertibleTo(intType) {
+			return tm, fmt.Errorf("unable to convert expires_in to int64")
+		}
+		numOfSeconds = rv.Convert(intType).Int()
+	}
+	return time.Now().Add((time.Duration(numOfSeconds) * time.Second) - delta), nil
+}
+
+// TokenFromMap create a *Token from a map[string]interface{}. Expect the
+// access_token, refresh_token and token_type values to be strings, expires_in
+// may be string or a type convertible to int64.
+func TokenFromMap(vals map[string]interface{}, expiryDelta time.Duration) (*Token, error) {
+	var t *Token
+	t = t.WithExtra(vals)
+	strValues, err := getMapStrings(vals, "access_token", "refresh_token", "token_type")
+	if err != nil {
+		return nil, err
+	}
+	t.AccessToken, t.RefreshToken, t.TokenType = strValues[0], strValues[1], strValues[2]
+	t.Expiry, err = getDateFromInterface(vals["expires_in"], expiryDelta)
+	return t, err
 }

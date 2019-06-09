@@ -57,13 +57,13 @@ func decodeToBigInt(s string) *big.Int {
 }
 
 func TestExpirationClaims(t *testing.T) {
-	if _, _, err := jws.ExpirationClaims(0, -10*time.Second); err == nil {
+	c := &jws.ClaimSet{}
+	if err := c.SetExpirationClaims(0, -10*time.Second); err == nil {
 		t.Errorf("jws expiration claims expected invalid Exp; got nil err")
 	}
-	if iat, exp, err := jws.ExpirationClaims(100*time.Second, 30*time.Second); err != nil || exp-iat != 30 {
-		t.Errorf("expected nil error with 30 second difference; got %v %d", err, exp-iat)
+	if err := c.SetExpirationClaims(100*time.Second, 30*time.Second); err != nil || c.ExpiresAt-c.IssuedAt != 30 {
+		t.Errorf("expected nil error with 30 second difference; got %v %d", err, c.ExpiresAt-c.IssuedAt)
 	}
-
 }
 
 func TestClaimSet_Decode(t *testing.T) {

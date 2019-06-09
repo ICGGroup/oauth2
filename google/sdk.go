@@ -70,25 +70,9 @@ func NewSDKConfig(account string) (*SDKConfig, error) {
 		return nil, fmt.Errorf("oauth2/google: no credentials found in %q, run `gcloud auth login` to create one", credentialsPath)
 	}
 	if account == "" {
-		propertiesPath := filepath.Join(configPath, "properties")
-		f, err := os.Open(propertiesPath)
-		if err != nil {
-			return nil, fmt.Errorf("oauth2/google: failed to load SDK properties: %v", err)
+		if account, err = getAccountFromProperties(filepath.Join(configPath, "properties")); err != nil {
+			return nil, err
 		}
-		defer f.Close()
-		ini, err := ParseINI(f)
-		if err != nil {
-			return nil, fmt.Errorf("oauth2/google: failed to parse SDK properties %q: %v", propertiesPath, err)
-		}
-		core, ok := ini["core"]
-		if !ok {
-			return nil, fmt.Errorf("oauth2/google: failed to find [core] section in %v", ini)
-		}
-		active, ok := core["account"]
-		if !ok {
-			return nil, fmt.Errorf("oauth2/google: failed to find %q attribute in %v", "account", core)
-		}
-		account = active
 	}
 
 	for _, d := range c.Data {
@@ -117,6 +101,27 @@ func NewSDKConfig(account string) (*SDKConfig, error) {
 		}
 	}
 	return nil, fmt.Errorf("oauth2/google: no such credentials for account %q", account)
+}
+
+func getAccountFromProperties(fn string) (string, error) {
+	f, err := os.Open(fn)
+	if err != nil {
+		return "", fmt.Errorf("oauth2/google: failed to load SDK properties: %v", err)
+	}
+	defer f.Close()
+	ini, err := ParseINI(f)
+	if err != nil {
+		return "", fmt.Errorf("oauth2/google: failed to parse SDK properties %q: %v", fn, err)
+	}
+	core, ok := ini["core"]
+	if !ok {
+		return "", fmt.Errorf("oauth2/google: failed to find [core] section in %v", ini)
+	}
+	active, ok := core["account"]
+	if !ok {
+		return "", fmt.Errorf("oauth2/google: failed to find %q attribute in %v", "account", core)
+	}
+	return active, nil
 }
 
 // Client returns an HTTP client using Google Cloud SDK credentials to

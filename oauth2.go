@@ -18,8 +18,10 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jfcote87/ctxclient"
 )
@@ -119,7 +121,7 @@ func SetAuthURLParam(key, value string) AuthCodeOption {
 // Opts may include AccessTypeOnline or AccessTypeOffline, as well
 // as ApprovalForce.
 func (c *Config) AuthCodeURL(state string, opts ...AuthCodeOption) string {
-	var buf bytes.Buffer
+	var buf = &bytes.Buffer{}
 	buf.WriteString(c.Endpoint.AuthURL)
 	v := url.Values{
 		"response_type": {"code"},
@@ -199,11 +201,15 @@ type TokenSource interface {
 
 // RefreshToken retrieves a Token.  A developer may
 // use this to construct custom caching TokenSources.
-func (c *Config) RefreshToken(ctx context.Context, refreshToken string) (*Token, error) {
-	return c.retrieveToken(ctx, url.Values{
+func (c *Config) RefreshToken(ctx context.Context, refreshToken string, opts ...AuthCodeOption) (*Token, error) {
+	v := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
-	})
+	}
+	for _, o := range opts {
+		o.setValue(v)
+	}
+	return c.retrieveToken(ctx, v)
 }
 
 type tokenRefreshFunc func(context.Context) (*Token, error)
@@ -277,7 +283,8 @@ func ReuseTokenSource(t *Token, src TokenSource) TokenSource {
 // TokenSource returns a TokenSource that returns t until t expires,
 // automatically refreshing it as necessary.  This tokensource is
 // safe for use with different contexts.
-func (c *Config) TokenSource(t *Token) TokenSource {
+// opts
+func (c *Config) TokenSource(t *Token, opts ...AuthCodeOption) TokenSource {
 	var refreshToken string
 	if t != nil {
 		refreshToken = t.RefreshToken
@@ -289,7 +296,7 @@ func (c *Config) TokenSource(t *Token) TokenSource {
 		if refreshToken == "" {
 			return nil, errors.New("empty refresh token")
 		}
-		tk, err := c.RefreshToken(ctx, refreshToken)
+		tk, err := c.RefreshToken(ctx, refreshToken, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -362,7 +369,20 @@ func (c *Config) retrieveToken(ctx context.Context, v url.Values) (*Token, error
 			return nil, err
 		}
 	}
-	return fromMap(mappedValues, c.ExpiryDelta)
+	// handle strings from x-www-form-urlencoded and for PayPayl
+	if s, ok := mappedValues["expires_in"].(string); ok {
+		if mappedValues["expires_in"], err = strconv.ParseInt(s, 10, 64); err != nil {
+			return nil, fmt.Errorf("oauth2: unable to parse expires_in %v", err)
+		}
+	}
+	return TokenFromMap(mappedValues, c.delta())
+}
+
+func (c *Config) delta() time.Duration {
+	if c.ExpiryDelta > 0 {
+		return time.Duration(c.ExpiryDelta) * time.Second
+	}
+	return time.Duration(DefaultExpiryDelta) * time.Second
 }
 
 // Client returns an HTTP client using the provided token.

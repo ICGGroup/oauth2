@@ -70,6 +70,35 @@ func (c *ClaimSet) MarshalJSON() ([]byte, error) {
 	return json.Marshal(pc)
 }
 
+func (c *ClaimSet) setStringValues(k, v string) {
+	switch k {
+	case "iss":
+		c.Issuer = v
+	case "aud":
+		c.Audience = v
+	case "jti":
+		c.ID = v
+	case "sub":
+		c.Subject = v
+	default:
+		c.PrivateClaims[k] = v
+	}
+}
+
+func (c *ClaimSet) setNumericValues(k string, v float64) {
+	switch k {
+	case "exp":
+		c.ExpiresAt = int64(v)
+	case "iat":
+		c.IssuedAt = int64(v)
+	case "nbf":
+		c.NotBefore = int64(v)
+	default:
+		c.PrivateClaims[k] = v
+	}
+
+}
+
 // UnmarshalJSON places extra keys into PrivateClaims
 func (c *ClaimSet) UnmarshalJSON(b []byte) error {
 	pc := make(map[string]interface{})
@@ -80,29 +109,9 @@ func (c *ClaimSet) UnmarshalJSON(b []byte) error {
 	for k, v := range pc {
 		switch val := v.(type) {
 		case string:
-			switch k {
-			case "iss":
-				c.Issuer = val
-			case "aud":
-				c.Audience = val
-			case "jti":
-				c.ID = val
-			case "sub":
-				c.Subject = val
-			default:
-				c.PrivateClaims[k] = v
-			}
+			c.setStringValues(k, val)
 		case float64:
-			switch k {
-			case "exp":
-				c.ExpiresAt = int64(val)
-			case "iat":
-				c.IssuedAt = int64(val)
-			case "nbf":
-				c.NotBefore = int64(val)
-			default:
-				c.PrivateClaims[k] = v
-			}
+			c.setNumericValues(k, val)
 		default:
 			c.PrivateClaims[k] = v
 		}
@@ -127,17 +136,18 @@ func (c *ClaimSet) JWT(signer Signer) (string, error) {
 	return string(contentData) + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
-// ExpirationClaims returns the iat and exp JWT claim values.  iat is
-// set to the current time - startOffset duration and exp is set to
-// iat + tokenDuration.
-func ExpirationClaims(startOffset, tokenDuration time.Duration) (int64, int64, error) {
-	now := time.Now().Add(-startOffset)
-	iat := now.Unix()
-	exp := now.Add(tokenDuration).Unix()
-	if exp < iat {
-		return iat, exp, fmt.Errorf("jws: invalid Exp = %v; must be later than Iat = %v", exp, iat)
+// SetExpirationClaims sets the IssuedAt (iat) and ExpiresAt (exp) claims
+func (c *ClaimSet) SetExpirationClaims(startOffset, tokenDuration time.Duration) error {
+	if c == nil {
+		return errors.New("nil Claim")
 	}
-	return iat, exp, nil
+	now := time.Now().Add(-startOffset)
+	c.IssuedAt = now.Unix()
+	c.ExpiresAt = now.Add(tokenDuration).Unix()
+	if c.ExpiresAt <= c.IssuedAt {
+		return fmt.Errorf("jws: invalid Exp = %v; must be later than Iat = %v", c.ExpiresAt, c.IssuedAt)
+	}
+	return nil
 }
 
 type jwtSection int

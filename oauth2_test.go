@@ -484,15 +484,19 @@ func TestFetchWithNoRefreshToken(t *testing.T) {
 
 func TestRefreshToken_RefreshTokenReplacement(t *testing.T) {
 	// checks that refresh token is reset when passed new refresh_token and preserved when not sent
-	expectedRefreshTokens := []string{"OLD_REFRESH_TOKEN", "NEW_REFRESH_TOKEN", "NEW_REFRESH_TOKEN"}
-	sendRefreshTokens := []string{"NEW_REFRESH_TOKEN", "", ""}
+	expectedRefreshTokens := []string{"OLD_REFRESH_TOKEN", "NEW_REFRESH_TOKEN", "NEW_REFRESH_TOKEN", "ANOTHER_TOKEN", "ANOTHER_TOKEN"}
+	sendRefreshTokens := []string{"NEW_REFRESH_TOKEN", "", "ANOTHER_TOKEN", "", ""}
 	counter := 0
 
 	ctx := context.Background()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
-		access_token := "OK"
+		access_token := fmt.Sprintf("OK%d", counter)
 
+		if r.Form.Get("claim1") != "A" || r.Form.Get("claim2") != "B" {
+			t.Errorf("%d expected claim1 = A and claim2 = B; got claim1 = %s and claim2 = %s",
+				counter, r.Form.Get("claim1"), r.Form.Get("claim2"))
+		}
 		if r.Form.Get("refresh_token") != expectedRefreshTokens[counter] {
 			access_token = fmt.Sprintf("test #%d expected %s; got %s", counter, expectedRefreshTokens[counter], r.Form.Get("refresh_token"))
 		}
@@ -515,14 +519,15 @@ func TestRefreshToken_RefreshTokenReplacement(t *testing.T) {
 	}))
 	defer ts.Close()
 	conf := newConf(ts.URL)
-	tkr := conf.TokenSource(&oauth2.Token{RefreshToken: expectedRefreshTokens[0]})
-	for counter < 3 {
+	tkr := conf.TokenSource(&oauth2.Token{RefreshToken: expectedRefreshTokens[0]},
+		oauth2.SetAuthURLParam("claim1", "A"), oauth2.SetAuthURLParam("claim2", "B"))
+	for counter < 5 {
 		tk, err := tkr.Token(ctx)
 		if err != nil {
 			t.Errorf("got err = %v; want none", err)
 			return
 		}
-		if tk.AccessToken != "OK" {
+		if tk.AccessToken != fmt.Sprintf("OK%d", counter) {
 			t.Errorf(tk.AccessToken)
 		}
 		counter++

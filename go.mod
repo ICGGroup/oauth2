@@ -4,14 +4,13 @@ go 1.12
 
 require (
 	cloud.google.com/go v0.39.0
-	github.com/google/go-cmp v0.3.0 // indirect
-	github.com/hashicorp/golang-lru v0.5.1 // indirect
 	github.com/jfcote87/ctxclient v0.5.0
-	golang.org/x/oauth2 v0.0.0-20190523182746-aaccbc9213b0 // indirect
-	golang.org/x/sys v0.0.0-20190528012530-adf421d2caf4 // indirect
-	golang.org/x/text v0.3.2 // indirect
+	go.opencensus.io v0.22.0 // indirect
+	golang.org/x/net v0.0.0-20190603091049-60506f45cf65 // indirect
+	golang.org/x/oauth2 v0.0.0-20190604053449-0f29369cfe45 // indirect
+	golang.org/x/sys v0.0.0-20190602015325-4c4f7f33c9ed // indirect
 	google.golang.org/api v0.5.0
 	google.golang.org/appengine v1.6.0
-	google.golang.org/genproto v0.0.0-20190522204451-c2c4e71fbf69 // indirect
-	google.golang.org/grpc v1.21.0
+	google.golang.org/genproto v0.0.0-20190605220351-eb0b1bdb6ae6 // indirect
+	google.golang.org/grpc v1.21.1
 )

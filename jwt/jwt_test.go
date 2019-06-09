@@ -10,6 +10,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -19,7 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jfcote87/oauth2"
 	"github.com/jfcote87/oauth2/jws"
 	"github.com/jfcote87/oauth2/jwt"
 )
@@ -135,10 +135,15 @@ func TestJWTFetch_BadResponseType(t *testing.T) {
 		`{"access_token":"123", "scope": "user", "id_token": "abcdef", "token_type": "bearer"}`,
 		`{"access_token":"123", "scope": "user", "token_type": "bearer", "expires_in": "60"}`,
 		`{"access_token":"123", "scope": "user", "token_type": "mac", "expires_in": {}}`,
+		`{"acc`,
 	}
 	counter := 0
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if counter >= len(responses) {
+			http.Error(w, "internal error", http.StatusExpectationFailed)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(responses[counter]))
 		//`{"access_token":123, "scope": "user", "token_type": "bearer"}`))
@@ -149,11 +154,12 @@ func TestJWTFetch_BadResponseType(t *testing.T) {
 		Issuer:   "aaa@xxx.com",
 		Signer:   signer,
 		TokenURL: ts.URL,
+		Options:  jwt.IDTokenSetsExpiry(),
 	}
-	for counter = 0; counter < len(responses); counter++ {
+	for counter = 0; counter <= len(responses); counter++ {
 		_, err := conf.TokenSource(nil).Token(context.Background())
 		if err == nil {
-			t.Error("got a token; expected error")
+			t.Errorf("%d got a token; expected error", counter)
 		}
 	}
 }
@@ -213,7 +219,7 @@ func TestJWTFetch_Assertion(t *testing.T) {
 }
 
 func TestJWTIDToken_ExpiryDetail(t *testing.T) {
-	tm := time.Now().Add(time.Hour)
+	tm := time.Now().Add(2 * time.Hour)
 
 	payload := &jws.ClaimSet{
 		Issuer:    "http://google.com/",
@@ -232,26 +238,42 @@ func TestJWTIDToken_ExpiryDetail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tokenVals := map[string]interface{}{
+		"access_token": "12345",
+		"scope":        "user",
+		"token_type":   "bearer",
+		"expires_in":   1800,
+	}
+	_ = tokenVals
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"access_token":"123", "scope": "user", "id_token":"%s", "token_type": "bearer"}`, encodedClaimSet)
+		json.NewEncoder(w).Encode(tokenVals)
 	}))
 
 	conf := &jwt.Config{
-		Issuer:     "aaa@xxx.com",
-		Signer:     jws.RS256(privateKey, ""),
-		TokenURL:   ts.URL,
-		Expiration: jwt.DefaultExpiration().ExpiryDelta(60),
-		// &jwt.ExpirationSetting{
-		//	ExpiryDelta: 60,
-		//},
+		Issuer:   "aaa@xxx.com",
+		Signer:   jws.RS256(privateKey, ""),
+		TokenURL: ts.URL,
+		Options:  jwt.IDTokenSetsExpiry().SetExpiryDelta(60),
 	}
+	// ensure response w/o id_token passes
 	tok, err := conf.TokenSource(nil).Token(context.Background())
 	if err != nil {
-		t.Fatal(err)
+		t.Errorf("expected success; got %v", err)
+		return
 	}
-
+	if tok.Expiry.Sub(time.Now()) > 30*time.Minute {
+		t.Errorf("expected expiry to be less than %v", time.Now().Add(30*time.Minute))
+		return
+	}
+	// set id_token for next response
+	tokenVals["id_token"] = encodedClaimSet
+	tok, err = conf.TokenSource(nil).Token(context.Background())
+	if err != nil {
+		t.Errorf("expected success; got %v", err)
+		return
+	}
 	if tm.Sub(tok.Expiry) != time.Minute {
 		t.Errorf("token expiry = %v; want %v", tok.Expiry, tm.Add(-time.Minute))
 	}
@@ -293,24 +315,19 @@ func TestConfigOptions(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"access_token":"123", "scope": "user", "id_token":"%s", "token_type": "bearer"}`, encodedClaimSet)
 	}))
-
 	conf := &jwt.Config{
-		Issuer:     "aaa@xxx.com",
-		Signer:     jws.RS256(privateKey, ""),
-		TokenURL:   ts.URL,
-		Expiration: jwt.DefaultExpiration().ExpiryDelta(60),
-		//&jwt.ExpirationSetting{
-		//	ExpiryDelta: 60,
-		//},
-		Scopes: []string{"s1", "s2"},
-		Options: &jwt.ConfigOptions{
-			PrivateClaims: map[string]interface{}{
+		Issuer:   "aaa@xxx.com",
+		Signer:   jws.RS256(privateKey, ""),
+		TokenURL: ts.URL,
+		Scopes:   []string{"s1", "s2"},
+		Options: jwt.IDTokenSetsExpiry().
+			SetExpiryDelta(60).
+			SetPrivateClaims(map[string]interface{}{
 				"pc": "pval",
-			},
-			FormValues: url.Values{
+			}).
+			SetFormValues(url.Values{
 				"extra": {"value"},
-			},
-		},
+			}),
 	}
 	tok, err := conf.TokenSource(nil).Token(context.Background())
 	if err != nil {
@@ -341,55 +358,101 @@ func TestServiceAccount(t *testing.T) {
 		t.Errorf("ServiceAccount.Config() expected success; got %v", err)
 		return
 	}
-	exp, _, iat := newcfg.Expiration.Values()
-	if newcfg.Expiration == nil || exp != int64(cfg.Expires/time.Second) || iat != 10 {
-		t.Errorf("ServiceAccount.Config expected &jwt.ExpirationSetting{Expires:1800000000000, ExpiryDelta:0, IatOffset:10000000000}; got %#v", newcfg.Expiration)
+	// expect 30 minutes (1800 seconds)
+	if newcfg.Options == nil || newcfg.Options.ExpiresIn == nil || *newcfg.Options.ExpiresIn != 1800 {
+		var got *int64
+		if newcfg.Options != nil {
+			got = newcfg.Options.ExpiresIn
+		}
+		t.Errorf("expected ExpiresIn = 30; got %v", got)
+		return
 	}
 }
 
-func TestExpirationSettings(t *testing.T) {
-	var expPtr *jwt.ExpirationSetting
-	if expires, delta, iatOff := expPtr.Values(); expires != 3600 || delta != oauth2.DefaultExpiryDelta || iatOff != 10 {
-		t.Errorf("nil ExpirationSettings expected default of %d, %d, %d; got %d, %d, %d",
-			time.Hour, oauth2.DefaultExpiryDelta, 10*time.Second, expires, delta, iatOff)
+func TestPayloadError(t *testing.T) {
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"access_token":"123", "scope": "user", "token_type": "bearer"}`))
+	}))
+	defer ts.Close()
+	conf := &jwt.Config{
+		Issuer:   "aaa@xxx.com",
+		Signer:   &badSigner{},
+		TokenURL: ts.URL,
+		Scopes:   []string{"s1", "s2"},
 	}
-	if expires, delta, iatOff := expPtr.Duration(60).Values(); expires != 60 || delta != oauth2.DefaultExpiryDelta || iatOff != 10 {
-		t.Errorf("ExpirationSettings Duration expected %d, %d, %d; got %d, %d, %d",
-			60, oauth2.DefaultExpiryDelta, 10, expires, delta, iatOff)
-	}
-	if expires, delta, iatOff := expPtr.ExpiryDelta(5).Values(); expires != 3600 || delta != 5 || iatOff != 10 {
-		t.Errorf("ExpirationSettings ExpiryDelta expected %d, %d, %d; got %d, %d, %d",
-			3600, 5, 10, expires, delta, iatOff)
-	}
-	if expires, delta, iatOff := expPtr.IatOffset(60).Values(); expires != 3600 || delta != oauth2.DefaultExpiryDelta || iatOff != 60 {
-		t.Errorf("ExpirationSettings IatOffset expected %d, %d, %d; got %d, %d, %d",
-			3600, oauth2.DefaultExpiryDelta, 60, expires, delta, iatOff)
+	if _, err := conf.TokenSource(nil).Token(context.Background()); err == nil {
+		t.Errorf("expected bad signer error; got nil")
 	}
 
-	expPtr = jwt.DefaultExpiration().Duration(60).ExpiryDelta(5).IatOffset(1)
-	b, err := json.Marshal(expPtr)
+	conf.Signer = jws.HS256([]byte("ABCDEFG"))
+	conf.Options = jwt.DefaultCfgOptions().SetExpiresIn(-3600)
+	if _, err := conf.TokenSource(nil).Token(context.Background()); err == nil {
+		t.Errorf("expected invalid Exp error; got nil")
+	}
+	conf.Options = nil
+	if _, err := conf.TokenSource(nil).Token(context.Background()); err != nil {
+		t.Errorf("expected success; got %v", err)
+	}
+}
+
+type badSigner struct{}
+
+func (b *badSigner) Sign([]byte) ([]byte, error) {
+	return nil, errors.New("sign error")
+}
+
+func (b *badSigner) Header() []byte {
+	return make([]byte, 0, 0)
+}
+
+func TestIDTokenAsAccessToken(t *testing.T) {
+	var idToken string
+	sendIDToken := false
+	now := time.Now()
+	signer := jws.HS256([]byte("ABCDEFG"))
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		cs := &jws.ClaimSet{
+			Issuer:    "a",
+			Audience:  "a",
+			IssuedAt:  now.Unix(),
+			ExpiresAt: now.Unix() + 3600,
+		}
+		idToken, _ = cs.JWT(signer)
+		var result = map[string]interface{}{
+			"access_token": "not the token you are looking for",
+			"expires_in":   now.Unix() + 1800,
+		}
+		if sendIDToken {
+			result["id_token"] = idToken
+		}
+		w.Header().Set("content-type", "application/json")
+		json.NewEncoder(w).Encode(result)
+	}))
+	defer ts.Close()
+	conf := &jwt.Config{
+		Issuer:   "aaa@xxx.com",
+		Signer:   signer,
+		TokenURL: ts.URL,
+		Scopes:   []string{"s1", "s2"},
+		Options:  jwt.IDTokenAsAccessToken().SetExpiryDelta(0).SetIatOffset(0),
+	}
+	_, err := conf.TokenSource(nil).Token(context.Background())
+	if err == nil || err.Error() != "oauth2: response doesn't have JWT token" {
+		t.Errorf("expected oauth2: response doesn't have JWT token; got %v", err)
+	}
+	sendIDToken = true
+	tk, err := conf.TokenSource(nil).Token(context.Background())
 	if err != nil {
-		t.Errorf("ExpirationSetting marshal: %v", err)
+		t.Errorf("expected success; got %v", err)
 		return
 	}
-	expPtr = nil
-	if err = json.Unmarshal(b, &expPtr); err != nil {
-		t.Errorf("ExpirationSetting unmarshal: %v", err)
-		return
+	if tk.AccessToken != idToken {
+		t.Errorf("expected idToken; got %s", tk.AccessToken)
 	}
-	if expires, delta, iatOff := expPtr.Values(); expires != 60 || delta != 5 || iatOff != 1 {
-		t.Errorf("Marshal/Unmarshal ExpirationSettings expected %d, %d, %d; got %d, %d, %d",
-			60, 5, 1, expires, delta, iatOff)
+	if tk.Expiry.Unix() != now.Unix()+3600 {
+		t.Errorf("expected expiry %d; got %d", now.Unix()+3600, tk.Expiry.Unix())
 	}
-	b = []byte(`{"expiryDelta": 20}`)
-	expPtr = nil
-	if err = json.Unmarshal(b, &expPtr); err != nil {
-		t.Errorf("ExpirationSetting unmarshal: %v", err)
-		return
-	}
-	if expires, delta, iatOff := expPtr.Values(); expires != 3600 || delta != 20 || iatOff != 10 {
-		t.Errorf("Marshal/Unmarshal ExpirationSettings expiryDelta expected %d, %d, %d; got %d, %d, %d",
-			3600, 20, 10, expires, delta, iatOff)
-	}
-
 }

@@ -42,7 +42,7 @@ func ExampleConfig() {
 	client.Get("...")
 }
 
-func ExampleConfig_Expiration() {
+func ExampleConfig_Options() {
 	// The contents of your RSA private key or your PEM file
 	// that contains a private key.
 	// If you have a p12 file instead, you
@@ -55,7 +55,6 @@ func ExampleConfig_Expiration() {
 	if err != nil {
 		log.Fatalf("Invalid key: %v", err)
 	}
-	var customExpiration *jwt.ExpirationSetting
 	conf := &jwt.Config{
 		Issuer: "xxx@developer.com",
 
@@ -64,7 +63,7 @@ func ExampleConfig_Expiration() {
 		TokenURL: "https://provider.com/o/oauth2/token",
 		// set token duration to 30 minutes and iat to 20 seconds.  ExpiryDelta remains
 		// oauth2.DefaultExpiryDelta
-		Expiration: customExpiration.Duration(1800).IatOffset(20),
+		Options: jwt.DefaultCfgOptions().SetExpiresIn(1800).SetIatOffset(20),
 	}
 	// Initiate an http.Client, the following GET request will be
 	// authorized and authenticated on the behalf of user@example.com.
@@ -85,7 +84,7 @@ func ExampleConfig_TokenSource() {
 		Issuer:   "xxx@developer.com",
 		Signer:   signer,
 		TokenURL: "https://provider.com/o/oauth2/token",
-		Options:  &jwt.ConfigOptions{},
+		Options:  jwt.DefaultCfgOptions().SetExpiryDelta(20),
 	}
 
 	ts := NewCustomCachingTokenSource(conf)

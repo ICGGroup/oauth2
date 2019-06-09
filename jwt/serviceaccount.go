@@ -53,18 +53,18 @@ func (cfg ServiceAccount) Config() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	var expSettings = DefaultExpiration()
+	opts := IDTokenSetsExpiry()
 	if cfg.Expires != 0 {
-		expSettings = expSettings.Duration(int64(cfg.Expires / time.Second))
+		opts = opts.SetExpiresIn(int64(cfg.Expires / time.Second))
 	}
 	return &Config{
-		Signer:     signer,
-		Issuer:     cfg.Email,
-		Subject:    cfg.Subject,
-		TokenURL:   cfg.TokenURL,
-		Audience:   cfg.TokenURL,
-		Scopes:     cfg.Scopes,
-		Expiration: expSettings,
+		Signer:   signer,
+		Issuer:   cfg.Email,
+		Subject:  cfg.Subject,
+		TokenURL: cfg.TokenURL,
+		Audience: cfg.TokenURL,
+		Scopes:   cfg.Scopes,
+		Options:  opts,
 	}, nil
 }
 
