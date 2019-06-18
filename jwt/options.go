@@ -134,6 +134,36 @@ func (opts *ConfigOptions) SetFormValues(values url.Values) *ConfigOptions {
 	return opts
 }
 
+// AddPrivateClaim add claim of key/value to the claimset
+func (opts *ConfigOptions) AddPrivateClaim(key string, value interface{}) *ConfigOptions {
+	if opts == nil {
+		return &ConfigOptions{
+			PrivateClaims: map[string]interface{}{key: value},
+		}
+	}
+	if opts.PrivateClaims == nil {
+		opts.PrivateClaims = map[string]interface{}{key: value}
+	} else {
+		opts.PrivateClaims[key] = value
+	}
+	return opts
+}
+
+// AddFormValue adds the key/value to the JWT urlform request
+func (opts *ConfigOptions) AddFormValue(key string, value string) *ConfigOptions {
+	if opts == nil {
+		return &ConfigOptions{
+			FormValues: url.Values{key: []string{value}},
+		}
+	}
+	if opts.FormValues == nil {
+		opts.FormValues = url.Values{key: []string{value}}
+	} else {
+		opts.FormValues.Add(key, value)
+	}
+	return opts
+}
+
 // DefaultCfgOptions returns ptr to an empty *ConfigOptions
 func DefaultCfgOptions() *ConfigOptions {
 	return &ConfigOptions{}
