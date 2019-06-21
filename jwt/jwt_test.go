@@ -15,7 +15,6 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -322,12 +321,8 @@ func TestConfigOptions(t *testing.T) {
 		Scopes:   []string{"s1", "s2"},
 		Options: jwt.IDTokenSetsExpiry().
 			SetExpiryDelta(60).
-			SetPrivateClaims(map[string]interface{}{
-				"pc": "pval",
-			}).
-			SetFormValues(url.Values{
-				"extra": {"value"},
-			}),
+			AddPrivateClaim("pc", "pval").
+			AddFormValue("extra", "value"),
 	}
 	tok, err := conf.TokenSource(nil).Token(context.Background())
 	if err != nil {

@@ -134,57 +134,44 @@ func (t *Token) Valid() bool {
 	return t != nil && t.AccessToken != "" && !t.expired()
 }
 
-var intType = reflect.TypeOf(int64(0))
-
-// getMapStrings returns string values from map based upon the key with
-// error if any values are not strings and not nil
-func getMapStrings(m map[string]interface{}, keys ...string) ([]string, error) {
-	var results = make([]string, len(keys), len(keys))
-	for i, k := range keys {
-		switch v := m[k].(type) {
+// TokenFromMap create a *Token from a map[string]interface{}. Expect the
+// access_token, refresh_token and token_type values to be strings, expires_in
+// may be string or a type convertible to int64.
+func TokenFromMap(vals map[string]interface{}, expiryDelta time.Duration) (*Token, error) {
+	t := &Token{raw: vals}
+	var strValues = []struct {
+		nm  string
+		ptr *string
+	}{
+		{nm: "access_token", ptr: &t.AccessToken},
+		{nm: "refresh_token", ptr: &t.RefreshToken},
+		{nm: "token_type", ptr: &t.TokenType},
+	}
+	for _, fld := range strValues {
+		switch v := vals[fld.nm].(type) {
 		case nil:
 		case string:
-			results[i] = v
+			*fld.ptr = v
 		default:
-			return results, fmt.Errorf("%s must be a string", k)
+			return nil, fmt.Errorf("%s must be a string", fld.nm)
 		}
 	}
-	return results, nil
-}
-
-// getDateFromInterfaceconverts calculates a time.Time from the
-// number of seconds indicated by val minus the delta
-func getDateFromInterface(val interface{}, delta time.Duration) (time.Time, error) {
-	var tm time.Time
 	var numOfSeconds int64
-	switch v := val.(type) {
+	switch v := vals["expires_in"].(type) {
 	case nil:
-		return tm, nil
+		return t, nil
 	case int64:
 		numOfSeconds = v
 	case float64:
 		numOfSeconds = int64(v)
 	default:
 		rv := reflect.Indirect(reflect.ValueOf(v))
+		var intType = reflect.TypeOf(int64(0))
 		if !rv.IsValid() || !rv.Type().ConvertibleTo(intType) {
-			return tm, fmt.Errorf("unable to convert expires_in to int64")
+			return nil, fmt.Errorf("unable to convert expires_in to int64")
 		}
 		numOfSeconds = rv.Convert(intType).Int()
 	}
-	return time.Now().Add((time.Duration(numOfSeconds) * time.Second) - delta), nil
-}
-
-// TokenFromMap create a *Token from a map[string]interface{}. Expect the
-// access_token, refresh_token and token_type values to be strings, expires_in
-// may be string or a type convertible to int64.
-func TokenFromMap(vals map[string]interface{}, expiryDelta time.Duration) (*Token, error) {
-	var t *Token
-	t = t.WithExtra(vals)
-	strValues, err := getMapStrings(vals, "access_token", "refresh_token", "token_type")
-	if err != nil {
-		return nil, err
-	}
-	t.AccessToken, t.RefreshToken, t.TokenType = strValues[0], strValues[1], strValues[2]
-	t.Expiry, err = getDateFromInterface(vals["expires_in"], expiryDelta)
-	return t, err
+	t.Expiry = time.Now().Add((time.Duration(numOfSeconds) * time.Second) - expiryDelta)
+	return t, nil
 }

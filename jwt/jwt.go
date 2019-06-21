@@ -77,12 +77,11 @@ func (c *Config) Client(t *oauth2.Token) (*http.Client, error) {
 // payload returns the body of a token request
 func (c *Config) payload() (url.Values, error) {
 	privateClaims := make(map[string]interface{})
+	for k, v := range c.Options.getPrivateClaims() {
+		privateClaims[k] = v
+	}
 	if len(c.Scopes) > 0 {
 		privateClaims["scope"] = strings.Join(c.Scopes, " ")
-	}
-
-	formValues := url.Values{
-		"grant_type": {defaultGrantType},
 	}
 
 	claimSet := &jws.ClaimSet{
@@ -95,20 +94,17 @@ func (c *Config) payload() (url.Values, error) {
 		return nil, err
 	}
 
-	// check options for custom claim set handling
-	for k, v := range c.Options.getPrivateClaims() {
-		privateClaims[k] = v
-	}
-	for k, v := range c.Options.getFormValues() {
-		formValues[k] = v
-	}
-
 	tokenString, err := claimSet.JWT(c.Signer)
 	if err != nil {
 		return nil, err
 	}
-	formValues.Set("assertion", tokenString)
-
+	formValues := url.Values{
+		"grant_type": {defaultGrantType},
+		"assertion":  {tokenString},
+	}
+	for k, v := range c.Options.getFormValues() {
+		formValues[k] = v
+	}
 	return formValues, nil
 }
 
