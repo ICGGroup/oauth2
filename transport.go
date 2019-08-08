@@ -56,7 +56,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	req2 := cloneRequest(req) // per RoundTripper contract
 	tk.SetAuthHeader(req2)
-	return t.Func.Do(ctx, req2)
+	return t.Func.Client(ctx).Do(req2)
 }
 
 // deep copy header
