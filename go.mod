@@ -6,7 +6,7 @@ require (
 	cloud.google.com/go v0.40.0
 	github.com/googleapis/gax-go/v2 v2.0.5 // indirect
 	github.com/ICGGroup/ctxclient v0.5.2
-	github.com/ICGGroup/testutils v0.1.0 // indirect
+	github.com/ICGGroup/testutils v0.1.1 // indirect
 	go.opencensus.io v0.22.0 // indirect
 	golang.org/x/net v0.0.0-20190620200207-3b0461eec859 // indirect
 	golang.org/x/sys v0.0.0-20190624142023-c5567b49c5d0 // indirect
