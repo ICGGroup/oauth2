@@ -4,7 +4,7 @@ go 1.11
 
 require (
 	cloud.google.com/go v0.40.0
-	github.com/ICGGroup/ctxclient v0.6.0
+	github.com/ICGGroup/ctxclient v0.6.1
 	github.com/ICGGroup/testutils v0.2.0 // indirect
 	github.com/googleapis/gax-go/v2 v2.0.5 // indirect
 	go.opencensus.io v0.22.0 // indirect
