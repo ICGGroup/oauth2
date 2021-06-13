@@ -1,6 +1,6 @@
 # OAuth2 for Go
 
-[![GoDoc](https://godoc.org/github.com/jfcote87/oauth2?status.svg)](https://godoc.org/github.com/jfcote87/oauth2)
+[![GoDoc](https://godoc.org/github.com/ICGGroup/oauth2?status.svg)](https://godoc.org/github.com/ICGGroup/oauth2)
 
 oauth2 package is forked from golang.org/x/oauth2.  The major change is the handling of contexts.
 Context for requesting tokens is taken from the http.request rather than stored in the
@@ -28,7 +28,7 @@ https://github.com/golang/oauth2/issues/84 CacheToken/transport confusion
 ## Installation
 
 ~~~~
-go get github.com/jfcote87/oauth2
+go get github.com/ICGGroup/oauth2
 ~~~~
 
 

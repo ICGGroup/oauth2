@@ -10,9 +10,9 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/jfcote87/oauth2"
-	"github.com/jfcote87/oauth2/google"
-	"github.com/jfcote87/oauth2/jwt"
+	"github.com/ICGGroup/oauth2"
+	"github.com/ICGGroup/oauth2/google"
+	"github.com/ICGGroup/oauth2/jwt"
 )
 
 func ExampleDefaultClient() {

@@ -7,7 +7,7 @@ package google_test
 import (
 	"testing"
 
-	"github.com/jfcote87/oauth2/google"
+	"github.com/ICGGroup/oauth2/google"
 )
 
 func TestSDKConfig(t *testing.T) {

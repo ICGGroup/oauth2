@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jfcote87/oauth2"
+	"github.com/ICGGroup/oauth2"
 )
 
 // appengineFlex is set at init time by appengineflex_hook.go. If true, we are on App Engine Flex.

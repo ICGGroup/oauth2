@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jfcote87/oauth2"
-	"github.com/jfcote87/oauth2/jws"
+	"github.com/ICGGroup/oauth2"
+	"github.com/ICGGroup/oauth2/jws"
 )
 
 // JWTAccessTokenSourceFromJSON uses a Google Developers service account JSON

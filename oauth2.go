@@ -5,7 +5,7 @@
 // Package oauth2 provides support for making
 // OAuth2 authorized and authenticated HTTP requests.
 // It can additionally grant authorization with Bearer JWT.
-package oauth2 // import "github.com/jfcote87/oauth2"
+package oauth2 // import "github.com/ICGGroup/oauth2"
 
 import (
 	"bytes"
@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jfcote87/ctxclient"
+	"github.com/ICGGroup/ctxclient"
 )
 
 // NoContext is the default background context
@@ -32,7 +32,7 @@ var NoContext = context.Background()
 // Config describes a typical 3-legged OAuth2 flow, with both the
 // client application information and the server's endpoint URLs.
 // For the client credentials 2-legged OAuth2 flow, see the clientcredentials
-// package (https://github.com/jfcote87/oauth2/clientcredentials).
+// package (https://github.com/ICGGroup/oauth2/clientcredentials).
 type Config struct {
 	// ClientID is the application's ID.
 	ClientID string

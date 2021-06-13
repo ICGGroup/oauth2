@@ -10,7 +10,7 @@
 //
 // See RFC 7515.
 //
-package jws // import "github.com/jfcote87/oauth2/jws"
+package jws // import "github.com/ICGGroup/oauth2/jws"
 
 import (
 	"bytes"

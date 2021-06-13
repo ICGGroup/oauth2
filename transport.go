@@ -10,7 +10,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/jfcote87/ctxclient"
+	"github.com/ICGGroup/ctxclient"
 )
 
 // Client creates a client that sets an authorization

@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jfcote87/oauth2/google"
-	"github.com/jfcote87/oauth2/jws"
+	"github.com/ICGGroup/oauth2/google"
+	"github.com/ICGGroup/oauth2/jws"
 )
 
 func TestJWTAccessTokenSourceFromJSON(t *testing.T) {

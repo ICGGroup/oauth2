@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jfcote87/oauth2"
+	"github.com/ICGGroup/oauth2"
 )
 
 type tokenSource struct{ token *oauth2.Token }

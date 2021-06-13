@@ -37,4 +37,4 @@
 // same as the one obtained from the oauth2.Config returned from ConfigFromJSON or
 // JWTConfigFromJSON, but the Credentials may contain additional information
 // that is useful is some circumstances.
-package google // import "github.com/jfcote87/oauth2/google"
+package google // import "github.com/ICGGroup/oauth2/google"

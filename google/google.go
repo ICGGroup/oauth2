@@ -12,7 +12,7 @@
 // https://developers.google.com/accounts/docs/OAuth2
 // and
 // https://developers.google.com/accounts/docs/application-default-credentials.
-package google // import "github.com/jfcote87/oauth2/google"
+package google // import "github.com/ICGGroup/oauth2/google"
 
 import (
 	"context"
@@ -25,9 +25,9 @@ import (
 
 	"cloud.google.com/go/compute/metadata"
 
-	"github.com/jfcote87/oauth2"
-	"github.com/jfcote87/oauth2/jws"
-	"github.com/jfcote87/oauth2/jwt"
+	"github.com/ICGGroup/oauth2"
+	"github.com/ICGGroup/oauth2/jws"
+	"github.com/ICGGroup/oauth2/jwt"
 )
 
 // Endpoint is Google's OAuth 2.0 endpoint.

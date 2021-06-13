@@ -15,8 +15,8 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/jfcote87/oauth2"
-	"github.com/jfcote87/oauth2/jws"
+	"github.com/ICGGroup/oauth2"
+	"github.com/ICGGroup/oauth2/jws"
 )
 
 // ConfigOptions provide additional (rarely used options for the config)

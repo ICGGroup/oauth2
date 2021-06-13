@@ -12,7 +12,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/jfcote87/oauth2/clientcredentials"
+	"github.com/ICGGroup/oauth2/clientcredentials"
 )
 
 func newConf(serverURL string) *clientcredentials.Config {

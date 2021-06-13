@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jfcote87/oauth2"
+	"github.com/ICGGroup/oauth2"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"

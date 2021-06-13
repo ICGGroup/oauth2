@@ -15,7 +15,7 @@ import (
 	"runtime"
 
 	"cloud.google.com/go/compute/metadata"
-	"github.com/jfcote87/oauth2"
+	"github.com/ICGGroup/oauth2"
 )
 
 // DefaultClient returns an HTTP Client that uses the

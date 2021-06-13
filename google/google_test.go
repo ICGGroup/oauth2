@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jfcote87/oauth2/google"
-	"github.com/jfcote87/oauth2/jws"
+	"github.com/ICGGroup/oauth2/google"
+	"github.com/ICGGroup/oauth2/jws"
 )
 
 var webJSONKey = []byte(`

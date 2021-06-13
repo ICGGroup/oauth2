@@ -11,15 +11,15 @@
 // server.
 //
 // See https://tools.ietf.org/html/rfc6749#section-4.4
-package clientcredentials // import "github.com/jfcote87/oauth2/clientcredentials"
+package clientcredentials // import "github.com/ICGGroup/oauth2/clientcredentials"
 
 import (
 	"context"
 	"net/http"
 	"net/url"
 
-	"github.com/jfcote87/ctxclient"
-	"github.com/jfcote87/oauth2"
+	"github.com/ICGGroup/ctxclient"
+	"github.com/ICGGroup/oauth2"
 )
 
 // Config describes a 2-legged OAuth2 flow, with both the

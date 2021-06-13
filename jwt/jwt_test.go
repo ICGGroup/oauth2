@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jfcote87/oauth2/jws"
-	"github.com/jfcote87/oauth2/jwt"
+	"github.com/ICGGroup/oauth2/jws"
+	"github.com/ICGGroup/oauth2/jwt"
 )
 
 var dummyPrivateKey = []byte(`-----BEGIN RSA PRIVATE KEY-----
